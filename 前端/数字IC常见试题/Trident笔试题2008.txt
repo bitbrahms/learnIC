@@ -1,0 +1,37 @@
+Trident笔试题
+发信站: 饮水思源 (2007年11月14日20:11:25 星期三), 站内信件
+
+    现场笔试的硬件只有IC logic design CM方向的
+
+1.  JK触发器的真值表；用RTL实现JK触发器；用JK触发器实现D触发器
+
+2.  y=(A xor B) or (C and D)，只能用INV，NAND，NOR，AND，OR，XOR中
+    的一种来实现，选那种？why？
+
+3.  2进制的1101.101变成十进制是多少？
+    十进制的10用IEEE754的单精度浮点如何表示？
+
+4.  阻塞赋值和非阻塞赋值的区别
+    always@(posedge clk)            always@(posedge clk)
+    begin                           begin
+        b=a;                            b<=a;
+        c=b;                            c<=b;
+    end                             end
+    上面两段代码的硬件结构是怎么样的？
+
+5.  化简代码使硬件尽可能少
+    always@ (sel or a or b or c)
+    if(sel)
+            y = a + b;
+    else
+            y = a + c;
+
+6.  Moore状态机和Mealy状态机哪个输出和输入有关？两者各自的优点是什么？
+
+7.  画检测序列0110的状态图和RTL代码
+
+8.  关于DC里link library, target library, symbol library的问题
+
+9.  写一些具体DC的代码
+
+10. 什么是DFT。谈一下你所了解的一个scan style

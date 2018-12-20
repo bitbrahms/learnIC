@@ -1,0 +1,33 @@
+威盛(VIA)的一道考题,求解!
+一个异步FIFO 为N*64
+
+题干为:
+
+parameter:
+
+1)Bus's clock is 500Mhz,width is 16 bit.
+
+2)The tipycal data payload packet is 8QW,the ACK packet is 2 DW.
+
+3)The latency from receiver receiving the complete data packet to send out the ACKpacket is 20ns.
+
+4)The throughput of transmitter FIFO's input and output is equaled. 
+
+Caculate the optimized FIFO depth N?
+
+怎么算深度N啊???    参数8QW和2 DW是什么意思?  请好心人仔细的指点一下!!!!
+
+
+
+答案大致如下：
+clk是500MHz
+延时20ns = 10clk
+bus一个clk传16bits = 2bytes
+
+FIFO中每个entry = 64bits=8bytes， bus传输用时4clk
+一个payload包=8QW=32bytes=4entry  ，bus传输用时16clk
+一个ACK包=2DW=4bytes= 1entry（虽然实际数据只占有半个entry，但是还是要占用一个整entry），bus传输用时2clk
+
+
+因为FIFO延时固定是10clk， bus延时最大是4clk（payload包出fifo时，bus传一个entry用4clk； ack包出fifo时，bus传一个entry用2clk），
+所以 N = （10+4）/ 4 +1 = 4 (进一) +1 = 5
