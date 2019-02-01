@@ -1,0 +1,13 @@
+#!/bin/csh
+
+mkdir result_log
+set vmd_name=`ls /cpuwrk/msic-bjckt/wrk/CHX003/verilog/Rev01/mega/cpu/rf_hif_c2pwff.v`
+
+foreach i (1 2 3 4 5 6 7 8 9 10 11 )
+	do
+    	chk_lib -lib ../CTpvt$i/LIBS/rf_hif_c2pwff.lib  -vmd ${vmd_name}  -log ./result_log/$i.log
+
+	end
+	
+
+	

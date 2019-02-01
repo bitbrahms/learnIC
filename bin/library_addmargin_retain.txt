@@ -1,0 +1,77 @@
+#!/usr/bin/perl
+$file=$ARGV[0];
+#$cell=$ARGV[1];
+$hold_margin=$ARGV[1];
+open ORG_FH, "< $file "||die "Can't open $file:$!";
+open NEW_FH ,"> $file.new"||die "Can't write $file.new:$!";
+
+@lib_org=<ORG_FH>;
+
+
+foreach $line (@lib_org) {
+	if ($line=~ /^\s*pin\s*\(rddat/i) {
+		#print "Found retain arc \n";
+		$flag=1;
+		push (@lib_new,$line);
+	} elsif ( ($flag == 1) && ($line=~ /retaining_rise/i) ) {
+		#print "Found hold Arc\n";
+		$flag=2;
+		push (@lib_new,$line);
+	}elsif ( ($flag == 2) && (($line=~ /^\s+\"([\d\.,\s]+)/) || ($line=~ /^\s+values\s*\(\s*\"([\d\.,\s]+)/)) ) {
+		#print "Found values";
+		$ti=$1;
+		@ti_ar=split /,\s*/ ,$ti;
+		@ti_ar_n= ();
+		foreach $t (@ti_ar) {
+			$n_n=$t*$hold_margin;
+			push (@ti_ar_n,$n_n);
+		} 
+		my $ti_new=join ", ",@ti_ar_n;
+		#print "$ti_new\n";
+		$line_new=$line;
+		$line_new=~ s/\"([\d.,\s]+)\"/\"$ti_new\"/;
+		#print "$line_new\n";
+		push (@lib_new,$line_new);
+	}elsif( ($flag == 2) &&  ($line=~ /^\s*retain_rise_slew/i)  ){
+		$flag=3;
+		print "$line\n";
+		push (@lib_new, $line);
+	} elsif ( ($flag == 3) && ($line=~ /retaining_fall/i) ) {
+		#print "Found hold Arc\n";
+		$flag=4;
+		push (@lib_new,$line);
+	}elsif ( ($flag == 4) && (($line=~ /^\s+\"([\d\.,\s]+)/) || ($line=~ /^\s+values\s*\(\s*\"([\d\.,\s]+)/)) ) {
+		#print "Found values";
+		$ti=$1;
+		@ti_ar=split /,\s*/ ,$ti;
+		@ti_ar_n= ();
+		foreach $t (@ti_ar) {
+			$n_n=$t*$hold_margin;
+			push (@ti_ar_n,$n_n);
+		} 
+		my $ti_new=join ", ",@ti_ar_n;
+		#print "$ti_new\n";
+		$line_new=$line;
+		$line_new=~ s/\"([\d.,\s]+)\"/\"$ti_new\"/;
+		#print "$line_new\n";
+		push (@lib_new,$line_new);
+	}elsif( ($flag == 4) &&  ($line=~ /^\s+retain_fall_slew/i)  ){
+		$flag=0;
+		print "$line\n";		
+		push (@lib_new, $line);
+	} else{
+		push (@lib_new, $line);
+	}
+
+}
+
+foreach $line (@lib_new)
+{
+	print NEW_FH $line;
+}
+
+print "Done\n";
+
+close ORG_FH;
+close NEW_FH;
+#`mv $cell.new $cell`

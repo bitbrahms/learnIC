@@ -1,0 +1,2914 @@
+#! /bin/env perl 
+# $Id: chk_lib,v 1.8 2008/12/15 07:03:00 tfgao Exp $
+# vim: set ft=perl sw=4 ts=8 tw=78:
+#*****************************************************************************
+#
+#             (c) Copyright 2001-2007,  VIA Technologies, Inc.       
+#                           ALL RIGHTS RESERVED                            
+#                                                                    
+#                 VIA Technologies CPU, Inc. CONFIDENTIAL                   
+#                                                                    
+#  This design and all of its related documentation constitutes valuable and
+#  confidential property of VIA Technologies, Inc.  No part of it may be
+#  reproduced in any form or by any means   used to make any
+#  transformation/adaptation/redistribution without the prior written
+#  permission from the copyright holders. 
+#
+#-----------------------------------------------------------------------------
+#
+# DESCRIPTION:
+#
+# FEATURES:
+#
+# TODO
+#
+# AUTHORS:
+#   Bauli Yang
+#
+#   
+#-----------------------------------------------------------------------------
+#                            REVISION HISTORY
+#   Revision 1.9  2014/11/13 16:55:49  JessieGuo
+#   add the function for checking PIN consistent among Layout and IPlist and
+#   Liberty library and Verilog Library and LEF file
+
+#   $Log: chk_lib,v $
+#   Revision 1.8  2008/12/15 07:03:00  tfgao
+#   change local dir to central /wrk/bjl1/bin
+#
+#   Revision 1.7  2008/11/21 08:08:49  tfgao
+#   update the POD
+#
+#   Revision 1.6  2008/09/26 05:50:55  tfgao
+#   merge parser and parser_2 together
+#
+#   Revision 1.5  2008/09/24 02:36:47  tfgao
+#   changing push to unshift, and it can use my local pm file
+#
+#   Revision 1.4  2008/09/23 03:22:45  tfgao
+#   *** empty log message ***
+#
+#   Revision 1.3  2008/09/22 08:45:07  tfgao
+#   changing vlog_lib_new to vlog_lib
+#
+#   Revision 1.2  2008/09/22 08:24:42  tfgao
+#   using the local pm file parser_2.pm and vlog_lib_new.pm to wait for merging
+#
+#   Revision 1.1  2008/06/27 08:05:18  tfgao
+#    Importing from /cad/bin for revision control
+#
+#
+#****************************************************************************/
+
+BEGIN {
+    #unshift @INC,'/cpuwrk/vt3442/tools/';
+    unshift @INC,'/cpuwrk/msic-bjckt/wrk/tool/chkport/v2/bin/';
+}
+
+
+use vlog_lib;
+use vlog_cmt;
+use parser;
+require "chd.pl";
+$logf = 'chk_lib.log';
+$err_Flag = 0;
+
+if ($#ARGV <= 4) {
+   print << "EOF";
+\nObjective:
+	Cross check the consistency among the following database:
+	   1) Project IP list
+	   2) Verilog designs
+	   3) Verilog library models
+	   4) Synopsys liberty format library models
+	   5) LEF files
+	
+	You may use this program to check the following issues:
+	   1) Library preparation : To confirm the consistency among project IP
+	   			    list and different library models
+	   2) Verilog-In netlist  : To confirm the consistency between verilog
+	   			    design and LEF files
+	   3) Liberty cell function : To check the existency of the function of
+	   			      liberty library, especially for pad cells
+
+	You may input any two or above types of database to this program.
+
+Usage : $0						\\
+	-iplist		input_IP_list			(optional)	\\
+	-design		input_verilog_designs		(optional)	\\
+	-vmd		input_verilog_vmd_models	(optional)	\\
+	-vmd_list       input_verilog_vmd_model_list    (optional)      \\
+	-lib		input_liberty_library_models	(optional)	\\
+	-lib_list       input_liberty_library_model_list (optional)     \\
+	-lef		input_physical_lef_files	(optional)	\\
+	-lef_list       input_physical_lef_file_list     (optional)     \\
+	-chd		input_layoutport_chd_file	(optional)	\\
+
+	-log		output_log_file
+        
+<Example of IP List>:
+	// IP_NAME            : lp_rx		from_vt3290
+	// IP_PIN             : DB4RXCLKH	1	output	normal	same_as_previous_project
+	// IP_TIMING_ARC      : IN => OUT	same_as_previous_project
+	// IP_TIMING_CHECK    : IN => OUT	setup/hold/width
+
+EOF
+exit 0;
+}
+
+$argvs = join ' ', @ARGV;
+$argvs =~ s/\s+\-/\n#\t\t    -/g;
+@IP_FILES = ();
+@DESIGN_FILES = ();
+@VMD_FILES = ();
+@LIB_FILES = ();
+@LEF_FILES = ();
+while ($arg = shift @ARGV) {
+   if ($arg =~ /^-design$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+         $netv = shift @ARGV;
+         push @DESIGN_FILES, $netv;
+      }
+   } elsif ($arg =~ /^-iplist$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+         $ip_list = shift @ARGV;
+         push @IP_FILES, $ip_list if $ip_list !~ /\*/;
+      }
+   } elsif ($arg =~ /^-vmd$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+         $vmd_file = shift @ARGV;
+         push @VMD_FILES, $vmd_file if $vmd_file !~ /\*/;
+       # print "@VMD_FILES\n"; #jessieg
+    }
+   } elsif ($arg =~ /^-vmd_list$/) {
+       while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+           $vmd_file = shift @ARGV;
+	      push @VMD_FILES_LIST, $vmd_file if $vmd_file !~ /\*/;
+         # print "@VMD_FILES_LIST\n"; #jessieg
+       }
+   } elsif ($arg =~ /^-lib$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+         $lib_file = shift @ARGV;
+         push @LIB_FILES, $lib_file if $lib_file !~ /\*/;
+      }
+   }elsif ($arg =~ /^-lib_list$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+	 $lib_file = shift @ARGV;
+	 push @LIB_FILES_LIST, $lib_file if $lib_file !~ /\*/;
+      }
+   } elsif ($arg =~ /^-lef$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+         $lef_file = shift @ARGV;
+         push @LEF_FILES, $lef_file if $lef_file !~ /\*/;
+      }
+   } elsif ($arg =~ /^-lef_list$/) {
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+	 $lef_file = shift @ARGV;
+         push @LEF_FILES_LIST, $lef_file if $lef_file !~ /\*/;
+      }
+   } elsif ($arg =~ /^-chd$/) {                  #jessieguo 2014/11/12
+      while ($#ARGV >= 0 && $ARGV[0] !~ /^-/) {
+         $chd_file = shift @ARGV;
+         push @CHD_FILES, $chd_file if $chd_file !~ /\*/;
+      }
+   } elsif ($arg =~ /^-log$/) {
+      $logf = shift @ARGV;
+   }
+}
+
+foreach my $vmd_file_list (@VMD_FILES_LIST) {
+   open(VFL,"$vmd_file_list") || die "Can't open file $vmd_file_list\n"; 
+   while($in=<VFL>) {
+       $in=~/\s*(\S+)/;
+       my @all_item=(glob $1);
+       foreach my $item (@all_item) {
+           push @VMD_FILES, $item;
+       }
+   }
+   close(VFL)
+}
+
+
+foreach my $lib_file_list (@LIB_FILES_LIST) {
+    open(LIBFL,"$lib_file_list") || die "Can't open file $lib_file_list\n"; 
+    while($in=<LIBFL>) {
+        $in=~/\s*(\S+)/;
+	my @all_item=(glob $1);
+            foreach my $item (@all_item) {
+	        push @LIB_FILES, $item;
+	    }
+	}
+    close(LIBFL)
+}
+
+
+foreach my $lef_file_list (@LEF_FILES_LIST) {
+    open(LEFL,"$lef_file_list") || die "Can't open file $lef_file_list\n"; 
+    while($in=<LEFL>) {
+        $in=~/\s*(\S+)/;
+	my @all_item=(glob $1);
+	foreach my $item (@all_item) {
+	    push @LEF_FILES, $item;
+	}
+     }
+    close(LEFL)
+}
+foreach my $chd_file_list (@CHD_FILES_LIST) {
+    open(CHDL,"$chd_file_list") || die "Can't open file $chd_file_list\n"; 
+    while($in=<CHDL>) {
+        $in=~/\s*(\S+)/;
+	my @all_item=(glob $1);
+	foreach my $item (@all_item) {
+	    push @CHD_FILES, $item;
+	}
+     }
+    close(CHDL)
+}
+
+open(LOGF,">$logf") || die "\nCan't open output log file '$logf'! $!.\n\n";
+$ltime = localtime;
+print LOGF "#"x80,"\n";
+print LOGF "#	Output Cross Check Macro Design and Liberty Library Report\n";
+print LOGF "#	PROGRAM   : $0\n";
+print LOGF "#	ARGUMENT  : $argvs\n";
+print LOGF "#	USER      : $ENV{'USER'}\n";
+print LOGF "#	PROGRAMER : Bauli Yang	ext. 6375\n";
+print LOGF "#	DATE      : $ltime\n";
+print LOGF "#"x80,"\n";
+
+$type_cnt = 0;
+$type_cnt = ($#DESIGN_FILES >= 0) ? $type_cnt+1 : $type_cnt;
+$type_cnt = ($#IP_FILES >= 0) ? $type_cnt+1 : $type_cnt;
+$type_cnt = ($#VMD_FILES >= 0) ? $type_cnt+1 : $type_cnt;
+$type_cnt = ($#LIB_FILES >= 0) ? $type_cnt+1 : $type_cnt;
+$type_cnt = ($#LEF_FILES >= 0) ? $type_cnt+1 : $type_cnt;
+$type_cnt = ($#CHD_FILES >= 0) ? $type_cnt+1 : $type_cnt;  #jessieg\
+
+if ($type_cnt < 2) {
+   print "\nERROR! ($0) Without Cross Check Information!\n";
+   print "Please specify at least two of '-design', '-vmd', '-lib' and '-lef' arguments!\n\n";
+   print LOGF "\nERROR! ($0) Without Cross Check Information!\n";
+   print LOGF "Please specify at least two of '-design', '-vmd', '-lib' and '-lef' arguments!\n\n";
+   exit 1;
+}
+
+if ($#IP_FILES >= 0) {
+   ($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+   print "Reading IP list ...\n";
+   parser::read_ip_list (@IP_FILES);
+   foreach $cell (sort keys %IP_INFO) {
+      foreach $pin (sort keys %{$IP_INFO{$cell}}) {
+        # print "xxxxxxx $pin \n" ;  #jessieguo
+         next if ! exists $IP_INFO{$cell}{$pin}{'msb'};
+         for ($idx=$IP_INFO{$cell}{$pin}{'msb'}; $idx>=$IP_INFO{$cell}{$pin}{'lsb'}; $idx--) {
+            $IP_INFO{$cell}{"$pin\[$idx\]"}{'dirt'} = $IP_INFO{$cell}{$pin}{'dirt'};
+            $IP_INFO{$cell}{"$pin\[$idx\]"}{'attr'} = $IP_INFO{$cell}{$pin}{'attr'};
+         }
+      }
+   }
+}
+
+if ($#VMD_FILES >= 0) {
+   ($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+   print "Reading verilog library...\n";
+   vlog_lib::read_verilog_library (@VMD_FILES);
+   foreach $cell (sort keys %BUS_INFO) {
+      foreach $bus (sort keys %{$BUS_INFO{$cell}}) {
+         for ($idx=$BUS_INFO{$cell}{$bus}{'msb'}; $idx>=$BUS_INFO{$cell}{$bus}{'lsb'}; $idx--) {
+            $PIN_DIRT{$cell}{"$bus\[$idx\]"} = $PIN_DIRT{$cell}{$bus};
+        }
+      }
+   }
+}
+
+if ($#LIB_FILES >= 0) {
+   ($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+   print "Reading liberty library...\n";
+   parser::read_lib (@LIB_FILES);
+   foreach $cell (sort keys %LIB_BUS_INFO) {
+      foreach $bus (sort keys %{$LIB_BUS_INFO{$cell}}) {
+         for ($idx=$LIB_BUS_INFO{$cell}{$bus}{'msb'}; $idx>=$LIB_BUS_INFO{$cell}{$bus}{'lsb'}; $idx--) {
+            $LIB_PIN_DIRT{$cell}{"$bus\[$idx\]"} = $LIB_PIN_DIRT{$cell}{$bus};
+            #print "xxx $LIB_PIN_DIRT\{$cell\}\{\"$bus\[$idx\]\"\} \n";  #jessieguo
+         }
+      }
+   }
+}
+
+if ($#LEF_FILES >= 0) {
+   ($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+   print "Reading lef file...\n";
+   parser::read_lef (@LEF_FILES);
+   foreach $cell (sort keys %LEF_PIN_DIRT) {
+      foreach $pin (sort keys %{$LEF_PIN_DIRT{$cell}}) {
+         if ($pin =~ /^(\S+)\[(\d+)\]$/) {
+            ($bus, $idx) = ($1, $2);
+            if (! exists $LEF_BUS_INFO{$cell}{$bus}) {
+               $LEF_BUS_INFO{$cell}{$bus}{'msb'} = $idx;
+               $LEF_BUS_INFO{$cell}{$bus}{'lsb'} = $idx;
+               $LEF_PIN_DIRT{$cell}{$bus} = $LEF_PIN_DIRT{$cell}{$pin};
+            } elsif ($LEF_BUS_INFO{$cell}{$bus}{'msb'} < $idx) {
+               $LEF_BUS_INFO{$cell}{$bus}{'msb'} = $idx;
+            } elsif ($LEF_BUS_INFO{$cell}{$bus}{'lsb'} > $idx) {
+               $LEF_BUS_INFO{$cell}{$bus}{'lsb'} = $idx;
+            }
+         }
+      }
+   }
+}
+
+if ($#DESIGN_FILES >= 0) {
+   ($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+   print "Reading design...\n";
+   vlog_lib::read_verilog_design (@DESIGN_FILES);
+}
+#########jessieguo########
+#read in chd file #######
+if ($#CHD_FILES >= 0) {
+   ($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+   print "Reading chd file...\n";
+    main::read_lay_pin(@CHD_FILES);
+#@cellname=keys %CHD_INFO;
+#foreach $laycell (keys %CHD_INFO) {
+# @laypin=keys %{$CHD_INFO{$laycell}};
+#print "xxxxx  $laycell  @laypin  \n";
+# }
+}
+###############################
+
+$DIRT_TBL{'input'} = 'i';
+$DIRT_TBL{'inout'} = 'b';
+$DIRT_TBL{'output'} = 'o';
+($s, $m, $h) = localtime(time);print "$h:$m:$s\t";
+print "Cross checking ...\n";
+ ###############################################################################
+ # 1) Check consistency between IP List and Verilog Library Model
+ ###############################################################################
+if ($#IP_FILES >= 0 && $#VMD_FILES >= 0) {
+   foreach $cell (sort keys %IP_INFO) {
+     # print "xxxx $cell \n";    #jessieg
+      if (! exists $PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $IP_NO_VMD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$IP_INFO{$cell}}) {
+         if (! exists $PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $IP_NO_VMD_CELL_PIN{$cell}{$pin} = 1;
+         } elsif ($PIN_DIRT{$cell}{$pin} ne $DIRT_TBL{$IP_INFO{$cell}{$pin}{'dirt'}}) {
+         ####################################################################
+         # Check cell direction consistency
+         ####################################################################
+            $IP_VMD_CELL_PIN_DIRT{$cell}{$pin} = "$DIRT_TBL{$IP_INFO{$cell}{$pin}{'dirt'}} =/= $PIN_DIRT{$cell}{$pin}";
+         }
+         ####################################################################
+         # Check bus width consistency
+         ####################################################################
+         if (exists $IP_INFO{$cell}{$pin}{'msb'}
+	 && (! exists $BUS_INFO{$cell} || ! exists $BUS_INFO{$cell}{$pin})) {
+            $IP_VMD_CELL_BUS{$cell}{$pin}{'msb'} = "$IP_INFO{$cell}{$pin}{'msb'} : 1";
+            $IP_VMD_CELL_BUS{$cell}{$pin}{'lsb'} = "$IP_INFO{$cell}{$pin}{'lsb'} : 1";
+         } elsif (! exists $IP_INFO{$cell}{$pin}{'msb'}
+         && (exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin})) {
+            $IP_VMD_CELL_BUS{$cell}{$pin}{'msb'} = "1 : $BUS_INFO{$cell}{$pin}{'msb'}";
+            $IP_VMD_CELL_BUS{$cell}{$pin}{'lsb'} = "1 : $BUS_INFO{$cell}{$pin}{'lsb'}";
+         } elsif ($IP_INFO{$cell}{$pin}{'msb'}
+         && (exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin})) {
+            $vmd_msb = $BUS_INFO{$cell}{$pin}{'msb'};
+            $vmd_lsb = $BUS_INFO{$cell}{$pin}{'lsb'};
+            $ip_msb = $IP_INFO{$cell}{$pin}{'msb'};
+            $ip_lsb = $IP_INFO{$cell}{$pin}{'lsb'};
+            $IP_VMD_CELL_BUS{$cell}{$pin}{'msb'} = "$ip_msb : $vmd_msb" if $ip_msb ne $vmd_msb;
+            $IP_VMD_CELL_BUS{$cell}{$pin}{'lsb'} = "$ip_lsb : $vmd_lsb" if $ip_lsb ne $vmd_lsb;
+         }
+      }
+      foreach $ipin (sort keys %{$IP_ARC_INFO{$cell}}) {
+         foreach $opin (sort keys %{$IP_ARC_INFO{$cell}{$ipin}}) {
+            #################################################################
+            # Check timing arc consistency
+            #################################################################
+            if (! exists $VMD_ARC_INFO{$cell}{$ipin}{$opin}) {
+	       if($ipin=~/(pos|neg)edge/){ #colin
+               $IP_NO_VMD_ARC{$cell}{$ipin}{$opin} = 1;
+	       }else{ #colin
+		  if(!exists $VMD_ARC_INFO{$cell}{"posedge $ipin"}{$opin} ||
+		     !exists $VMD_ARC_INFO{$cell}{"negedge $ipin"}{$opin}){
+		    $IP_NO_VMD_ARC{$cell}{$ipin}{$opin} = 1;
+		  } #colin
+	       } #colin
+            }
+         }
+      }
+      foreach $ipin (sort keys %{$VMD_ARC_INFO{$cell}}) {
+         foreach $opin (sort keys %{$VMD_ARC_INFO{$cell}{$ipin}}) {
+	    #print "ARC:$cell:$ipin:$opin\n";
+            if (! exists $IP_ARC_INFO{$cell}{$ipin}{$opin}) {
+	       if($ipin=~/(pos|neg)edge\s+([\w\[\]]+)/) {  #colin
+		   $tpin = $2;		     #colin
+		   if( exists $IP_ARC_INFO{$cell}{$tpin}{$opin} && #colin 
+		       exists $VMD_ARC_INFO{$cell}{"posedge $tpin"}{$opin} &&
+		       exists $VMD_ARC_INFO{$cell}{"negedge $tpin"}{$opin}){
+		   }else{ #colin
+			$VMD_NO_IP_ARC{$cell}{$ipin}{$opin} = 1; #colin
+		   } #colin
+	       } #colin
+	       else{					#colin
+               $VMD_NO_IP_ARC{$cell}{$ipin}{$opin} = 1;
+	       }					#colin
+            }
+         }
+      }
+   }
+   foreach $cell (sort keys %PIN_DIRT) {
+      foreach $pin (sort keys %{$PIN_DIRT{$cell}}) {
+         if (exists $IP_INFO{$cell} && ! exists $IP_INFO{$cell}{$pin} && $pin !~ /\[\d+\]/) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $VMD_NO_IP_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+   #################################################################
+   # Check timing check consistency
+   #################################################################
+   foreach $cell (sort keys %IP_CHK_INFO) {
+      foreach $type (sort keys %{$IP_CHK_INFO{$cell}}) {
+         foreach $timing_chk (sort keys %{$IP_CHK_INFO{$cell}{$type}}) {
+            #if (! exists $VMD_CHK_INFO{$cell} || ! exists $VMD_CHK_INFO{$cell}{$type}
+            #||  ! exists $VMD_CHK_INFO{$cell}{$type}{$timing_chk}) {
+            #   $IP_NO_VMD_CHK{$cell}{$type}{$timing_chk} = 1;
+            #}
+            if (! exists $VMD_CHK_INFO{$cell} || ! exists $VMD_CHK_INFO{$cell}{$type}) {
+               $IP_NO_VMD_CHK{$cell}{$type}{$timing_chk} = 1;
+            }elsif (! exists $VMD_CHK_INFO{$cell}{$type}{$timing_chk}) {
+		my $tmp_chk;
+		if($type=~/setup/){
+		    $tmp_chk = $timing_chk;
+		    $tmp_chk =~ s/(pos|neg)edge\s+([\w\[\]]+)\s+=>/$2 =>/;
+		    if(! exists $VMD_CHK_INFO{$cell}{$type}{$tmp_chk}){
+			$IP_NO_VMD_CHK{$cell}{$type}{$timing_chk} = 1;
+		    }
+		}elsif($type=~/hold/){
+		    $tmp_chk = $timing_chk;
+		    $tmp_chk =~ s/=>\s+(pos|neg)edge\s+([\w\[\]]+)/=> $2/;
+		    if(! exists $VMD_CHK_INFO{$cell}{$type}{$tmp_chk}){
+			$IP_NO_VMD_CHK{$cell}{$type}{$timing_chk} = 1;
+		    }
+		}else{
+			$IP_NO_VMD_CHK{$cell}{$type}{$timing_chk} = 1;
+		}
+	    }
+         }
+      }
+   }
+   foreach $cell (sort keys %VMD_CHK_INFO) {
+      foreach $type (sort keys %{$VMD_CHK_INFO{$cell}}) {
+         foreach $timing_chk (sort keys %{$VMD_CHK_INFO{$cell}{$type}}) {
+            #if (exists $IP_INFO{$cell} && (! exists $IP_CHK_INFO{$cell}
+	    #||  ! exists $IP_CHK_INFO{$cell}{$type} ||  ! exists $IP_CHK_INFO{$cell}{$type}{$timing_chk})) {
+            #   $VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+            #}
+            if (exists $IP_INFO{$cell} && (! exists $IP_CHK_INFO{$cell}
+	    ||  ! exists $IP_CHK_INFO{$cell}{$type})) {
+               $VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+            }elsif(exists $IP_INFO{$cell} && ! exists $IP_CHK_INFO{$cell}{$type}{$timing_chk}){
+		my $tmp_chk;
+		if($type=~/setup/){
+		    $tmp_chk = $timing_chk;
+		    $tmp_chk = "posedge $timing_chk";
+		    if(!exists $IP_CHK_INFO{$cell}{$type}{$tmp_chk}){
+			$VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+		    }
+		    $tmp_chk = $timing_chk;
+		    $tmp_chk = "negedge $timing_chk";
+		    if(!exists $IP_CHK_INFO{$cell}{$type}{$tmp_chk}){
+			$VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+		    }
+		}elsif($type=~/hold/){
+		    $tmp_chk = $timing_chk;
+		    $tmp_chk =~ s/=>\s+([\w\[\]]+)/=> posedge $1/;
+		    if(!exists $IP_CHK_INFO{$cell}{$type}{$tmp_chk}){
+			$VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+		    }
+		    $tmp_chk = $timing_chk;
+		    $tmp_chk =~ s/=>\s+([\w\[\]]+)/=> negedge $1/;
+		    if(!exists $IP_CHK_INFO{$cell}{$type}{$tmp_chk}){
+			$VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+		    }
+		}elsif(exists $IP_INFO{$cell}){
+		    $VMD_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+		}
+	    }
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 2) Check consistency between IP List and Liberty Library Model
+ ###############################################################################
+if ($#IP_FILES >= 0 && $#LIB_FILES >= 0) {
+   foreach $cell (sort keys %IP_INFO) {
+#										foreach $type (sort keys %{$main::LIB_CHK_INFO{$cell}}) {
+#										foreach $timing_chk (sort keys %{$main::LIB_CHK_INFO{$cell}{$type}}) {
+#										print "LIB_CHK_INFO{$cell}{$type}{$timing_chk} = 1\n";
+#										}
+#										}
+      if (! exists $LIB_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $IP_NO_LIB_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$IP_INFO{$cell}}) {
+         if (! exists $LIB_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $IP_NO_LIB_CELL_PIN{$cell}{$pin} = 1;
+         } elsif ($LIB_PIN_DIRT{$cell}{$pin} ne $DIRT_TBL{$IP_INFO{$cell}{$pin}{'dirt'}}) {
+         ####################################################################
+         # Check cell direction consistency
+         ####################################################################
+            $IP_LIB_CELL_PIN_DIRT{$cell}{$pin} = "$DIRT_TBL{$IP_INFO{$cell}{$pin}{'dirt'}} =/= $LIB_PIN_DIRT{$cell}{$pin}";
+         }
+         ####################################################################
+         # Check bus width consistency
+         ####################################################################
+         if (exists $IP_INFO{$cell}{$pin}{'msb'}
+	 && (!exists $LIB_BUS_INFO{$cell} || ! exists $LIB_BUS_INFO{$cell}{$pin})) {
+            $IP_LIB_CELL_BUS{$cell}{$pin}{'msb'} = "$IP_INFO{$cell}{$pin}{'msb'} : 1";
+            $IP_LIB_CELL_BUS{$cell}{$pin}{'lsb'} = "$IP_INFO{$cell}{$pin}{'lsb'} : 1";
+         } elsif (! exists $IP_INFO{$cell}{$pin}{'msb'}
+         && (exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin})) {
+            $IP_LIB_CELL_BUS{$cell}{$pin}{'msb'} = "1 : $LIB_BUS_INFO{$cell}{$pin}{'msb'}";
+            $IP_LIB_CELL_BUS{$cell}{$pin}{'lsb'} = "1 : $LIB_BUS_INFO{$cell}{$pin}{'lsb'}";
+         } elsif (exists $IP_INFO{$cell}{$pin}{'msb'}
+         && (exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin})) {
+            $lib_msb = $LIB_BUS_INFO{$cell}{$pin}{'msb'};
+            $lib_lsb = $LIB_BUS_INFO{$cell}{$pin}{'lsb'};
+            $ip_msb = $IP_INFO{$cell}{$pin}{'msb'};
+            $ip_lsb = $IP_INFO{$cell}{$pin}{'lsb'};
+            $IP_LIB_CELL_BUS{$cell}{$pin}{'msb'} = "$ip_msb : $lib_msb" if $ip_msb ne $lib_msb;
+            $IP_LIB_CELL_BUS{$cell}{$pin}{'lsb'} = "$ip_lsb : $lib_lsb" if $ip_lsb ne $lib_lsb;
+         }
+      }
+      foreach $ipin (sort keys %{$IP_ARC_INFO{$cell}}) {
+         foreach $opin (sort keys %{$IP_ARC_INFO{$cell}{$ipin}}) {
+            #################################################################
+            # Check timing arc consistency
+            #################################################################
+            if (! exists $LIB_ARC_INFO{$cell}{$ipin}{$opin}) {
+	       if($ipin =~ /\[\s*\d+\s*\]/) {
+		  my $tmp_ipin;
+		  $tmp_ipin = $ipin;
+		  $tmp_ipin =~ s/\[\s*\d+\s*\]//;
+		  if(! exists $LIB_ARC_INFO{$cell}{$tmp_ipin}{$opin}) {
+		     $IP_NO_LIB_ARC{$cell}{$ipin}{$opin} = 1;
+		     #print "BIT:$cell:$ipin:$opin:$tmp_ipin\n";
+		  }
+               }else {
+		  $IP_NO_LIB_ARC{$cell}{$ipin}{$opin} = 1;
+		     #print "BUS:$cell:$ipin:$opin\n";
+	       }
+            }
+         }
+      }
+      foreach $ipin (sort keys %{$LIB_ARC_INFO{$cell}}) {
+         foreach $opin (sort keys %{$LIB_ARC_INFO{$cell}{$ipin}}) {
+	    if(exists $LIB_BUS_INFO{$cell}{$ipin}){
+	       my $tmp_msb;
+	       my $tmp_lsb;
+	       my $tmp_cnt;
+	       my $exist_flag;
+
+	       $tmp_msb = $LIB_BUS_INFO{$cell}{$ipin}{'msb'};
+	       $tmp_lsb = $LIB_BUS_INFO{$cell}{$ipin}{'lsb'};
+	       $exist_flag = 0; 
+
+	       for($tmp_cnt=$tmp_lsb; $tmp_cnt<=$tmp_msb; $tmp_cnt++){
+		  if(exists $IP_ARC_INFO{$cell}{"$ipin\[$tmp_cnt\]"}{$opin}){
+		     $exist_flag = 1;
+		  }
+	       }
+
+	       if($exist_flag == 0) {
+                  $LIB_NO_IP_ARC{$cell}{$ipin}{$opin} = 1;
+	       }
+	       $exist_flag = 0;
+	    } else {
+	       if(! exists $IP_ARC_INFO{$cell}{$ipin}{$opin}) {
+                  $LIB_NO_IP_ARC{$cell}{$ipin}{$opin} = 1;
+               }
+	    }
+         }
+      }
+   }
+   foreach $cell (sort keys %LIB_PIN_DIRT) {
+      if(!exists $IP_INFO{$cell}) {
+	 $LIB_NO_IP_CELL{$cell} = 1;
+      }
+      foreach $pin (sort keys %{$LIB_PIN_DIRT{$cell}}) {
+         if (exists $IP_INFO{$cell} && ! exists $IP_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LIB_NO_IP_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+   #################################################################
+   # Check timing check consistency
+   #################################################################
+   foreach $cell (sort keys %IP_CHK_INFO) {
+      foreach $type (sort keys %{$IP_CHK_INFO{$cell}}) {
+         foreach $timing_chk (sort keys %{$IP_CHK_INFO{$cell}{$type}}) {
+            if (! exists $LIB_CHK_INFO{$cell} || ! exists $LIB_CHK_INFO{$cell}{$type}
+            ||  ! exists $LIB_CHK_INFO{$cell}{$type}{$timing_chk}) {
+               $IP_NO_LIB_CHK{$cell}{$type}{$timing_chk} = 1;
+            }
+         }
+      }
+   }
+   foreach $cell (sort keys %LIB_CHK_INFO) {
+      foreach $type (sort keys %{$LIB_CHK_INFO{$cell}}) {
+         foreach $timing_chk (sort keys %{$LIB_CHK_INFO{$cell}{$type}}) {
+            if (exists $IP_INFO{$cell} && (! exists $IP_CHK_INFO{$cell}
+	    ||  ! exists $IP_CHK_INFO{$cell}{$type} ||  ! exists $IP_CHK_INFO{$cell}{$type}{$timing_chk})) {
+               $LIB_NO_IP_CHK{$cell}{$type}{$timing_chk} = 1;
+            }
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 3) Check consistency between IP List and LEF File
+ ###############################################################################
+if ($#IP_FILES >= 0 && $#LEF_FILES >= 0) {
+   foreach $cell (sort keys %IP_INFO) {
+      if (! exists $LEF_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $IP_NO_LEF_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$IP_INFO{$cell}}) {
+         if (! exists $LEF_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $IP_NO_LEF_CELL_PIN{$cell}{$pin} = 1;
+         } elsif ($LEF_PIN_DIRT{$cell}{$pin} ne $DIRT_TBL{$IP_INFO{$cell}{$pin}{'dirt'}}) {
+         ####################################################################
+         # Check cell direction consistency
+         ####################################################################
+            $IP_LEF_CELL_PIN_DIRT{$cell}{$pin} = "$DIRT_TBL{$IP_INFO{$cell}{$pin}{'dirt'}} =/= $LEF_PIN_DIRT{$cell}{$pin}";
+         }
+         ####################################################################
+         # Check bus width consistency
+         ####################################################################
+         if (exists $IP_INFO{$cell}{$pin}{'msb'}
+	 && (! exists $LEF_BUS_INFO{$cell} || ! exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $IP_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "$IP_INFO{$cell}{$pin}{'msb'} : 1";
+            $IP_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "$IP_INFO{$cell}{$pin}{'lsb'} : 1";
+         } elsif (! exists $IP_INFO{$cell}{$pin}{'msb'}
+	 && (exists $LEF_BUS_INFO{$cell} && exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $IP_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "1 : $LEF_BUS_INFO{$cell}{$pin}{'msb'}";
+            $IP_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "1 : $LEF_BUS_INFO{$cell}{$pin}{'lsb'}";
+         } elsif (exists $IP_INFO{$cell}{$pin}{'msb'}
+	 && (exists $LEF_BUS_INFO{$cell}{$pin} && exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $lef_msb = $LEF_BUS_INFO{$cell}{$pin}{'msb'};
+            $lef_lsb = $LEF_BUS_INFO{$cell}{$pin}{'lsb'};
+            $ip_msb = $IP_INFO{$cell}{$pin}{'msb'};
+            $ip_lsb = $IP_INFO{$cell}{$pin}{'lsb'};
+            $IP_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "$ip_msb : $lef_msb" if $ip_msb ne $lef_msb;
+            $IP_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "$ip_lsb : $lef_lsb" if $ip_lsb ne $lef_lsb;
+         }
+      }
+   }
+   foreach $cell (sort keys %LEF_PIN_DIRT) {
+      foreach $pin (sort keys %{$LEF_PIN_DIRT{$cell}}) {
+         if (exists $IP_INFO{$cell} && ! exists $IP_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LEF_NO_IP_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 4) Check consistency between Design and Verilog Library Model
+ ###############################################################################
+if ($#VMD_FILES >= 0 && $#DESIGN_FILES >= 0) {
+   foreach $mod (sort keys %PIN_LINK) {
+      foreach $inst (sort keys %{$PIN_LINK{$mod}}) {
+         $cell = $INST_LINK{$mod}{$inst};
+         if (exists $MOD_LIST{$cell}) {
+            next;
+         } elsif (! exists $CELL_LIST{$cell}) {
+            ####################################################################
+            # Check cell existency
+            ####################################################################
+            $MISS_VMD_CELL{$cell}{$mod}{$inst} = 1;
+            next;
+         }
+         foreach $pin (sort keys %{$PIN_LINK{$mod}{$inst}}) {
+            ####################################################################
+            # Check cell pin consistency
+            ####################################################################
+            if (! exists $PIN_DIRT{$cell}{$pin}) {
+               $MISS_VMD_CELL_PIN{$cell}{$pin}{$mod}{$inst} = 1;
+            }
+            ####################################################################
+            # Check bus width consistency
+            ####################################################################
+            if (exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin}) {
+               $net = $PIN_LINK{$mod}{$inst}{$pin};
+               if (! exists $BUS_INFO{$mod} || ! exists $BUS_INFO{$mod}{$net}) {
+                  $NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'msb'} = "$BUS_INFO{$cell}{$pin}{'msb'} : 1";
+                  $NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'lsb'} = "$BUS_INFO{$cell}{$pin}{'lsb'} : 1";
+               } else {
+                  $lib_msb = $BUS_INFO{$cell}{$pin}{'msb'};
+                  $lib_lsb = $BUS_INFO{$cell}{$pin}{'lsb'};
+                  $net_msb = $BUS_INFO{$mod}{$net}{'msb'};
+                  $net_lsb = $BUS_INFO{$mod}{$net}{'lsb'};
+                  $NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'msb'} = "$lib_msb : $net_msb" if $lib_msb ne $net_msb;
+                  $NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'lsb'} = "$lib_lsb : $net_lsb" if $lib_lsb ne $net_lsb;
+               }
+            }
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 5) Check consistency between Design and Liberty Library Model
+ ###############################################################################
+if ($#LIB_FILES >= 0 && $#DESIGN_FILES >= 0) {
+   foreach $mod (sort keys %PIN_LINK) {
+      foreach $inst (sort keys %{$PIN_LINK{$mod}}) {
+         $cell = $INST_LINK{$mod}{$inst};
+         if (exists $MOD_LIST{$cell}) {
+            next;
+         } elsif (! exists $LIB_PIN_DIRT{$cell}) {
+            ####################################################################
+            # Check cell existency
+            ####################################################################
+            $MISS_LIB_CELL{$cell}{$mod}{$inst} = 1;
+            next;
+         }
+         foreach $pin (sort keys %{$PIN_LINK{$mod}{$inst}}) {
+            ####################################################################
+            # Check cell pin consistency
+            ####################################################################
+            if (! exists $LIB_PIN_DIRT{$cell}{$pin}) {
+               $MISS_LIB_CELL_PIN{$cell}{$pin}{$mod}{$inst} = 1;
+            }
+            ####################################################################
+            # Check bus width consistency
+            ####################################################################
+            if (exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin}) {
+               $net = $PIN_LINK{$mod}{$inst}{$pin};
+               if (! exists $BUS_INFO{$mod} || ! exists $BUS_INFO{$mod}{$net}) {
+                  $NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'msb'} = "$LIB_BUS_INFO{$cell}{$pin}{'msb'} : 1";
+                  $NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'lsb'} = "$LIB_BUS_INFO{$cell}{$pin}{'lsb'} : 1";
+               } else {
+                  $lib_msb = $LIB_BUS_INFO{$cell}{$pin}{'msb'};
+                  $lib_lsb = $LIB_BUS_INFO{$cell}{$pin}{'lsb'};
+                  $net_msb = $BUS_INFO{$mod}{$net}{'msb'};
+                  $net_lsb = $BUS_INFO{$mod}{$net}{'lsb'};
+                  $NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'msb'} = "$lib_msb : $net_msb" if $lib_msb ne $net_msb;
+                  $NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'lsb'} = "$lib_lsb : $net_lsb" if $lib_lsb ne $net_lsb;
+               }
+            }
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 6) Check consistency between Design and LEF File
+ ###############################################################################
+if ($#LEF_FILES >= 0 && $#DESIGN_FILES >= 0) {
+   foreach $mod (sort keys %PIN_LINK) {
+      foreach $inst (sort keys %{$PIN_LINK{$mod}}) {
+         $cell = $INST_LINK{$mod}{$inst};
+         if (exists $MOD_LIST{$cell}) {
+            next;
+         } elsif (! exists $LEF_PIN_DIRT{$cell}) {
+            ####################################################################
+            # Check cell existency
+            ####################################################################
+            $MISS_LEF_CELL{$cell}{$mod}{$inst} = 1;
+            next;
+         }
+         foreach $pin (sort keys %{$PIN_LINK{$mod}{$inst}}) {
+            ####################################################################
+            # Check cell pin consistency
+            ####################################################################
+            if (! exists $LEF_PIN_DIRT{$cell}{$pin}) {
+               $MISS_LEF_CELL_PIN{$cell}{$pin}{$mod}{$inst} = 1;
+            }
+            ####################################################################
+            # Check bus width consistency
+            ####################################################################
+            if (exists $LEF_BUS_INFO{$cell} && exists $LEF_BUS_INFO{$cell}{$pin}) {
+               $net = $PIN_LINK{$mod}{$inst}{$pin};
+               if (! exists $BUS_INFO{$mod} || ! exists $BUS_INFO{$mod}{$net}) {
+                  $NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'msb'} = "$LEF_BUS_INFO{$cell}{$pin}{'msb'} : 1";
+                  $NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'lsb'} = "$LEF_BUS_INFO{$cell}{$pin}{'lsb'} : 1";
+               } else {
+                  $lib_msb = $LEF_BUS_INFO{$cell}{$pin}{'msb'};
+                  $lib_lsb = $LEF_BUS_INFO{$cell}{$pin}{'lsb'};
+                  $net_msb = $BUS_INFO{$mod}{$net}{'msb'};
+                  $net_lsb = $BUS_INFO{$mod}{$net}{'lsb'};
+                  $NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'msb'} = "$lib_msb : $net_msb" if $lib_msb ne $net_msb;
+                  $NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}{$inst}{'lsb'} = "$lib_lsb : $net_lsb" if $lib_lsb ne $net_lsb;
+               }
+            }
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 7) Check consistency between Verilog Library Model and Liberty Library Model
+ ###############################################################################
+if ($#VMD_FILES >= 0 && $#LIB_FILES >= 0) {
+   foreach $cell (sort keys %CELL_LIST) {
+      if (! exists $LIB_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $VMD_NO_LIB_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$PIN_DIRT{$cell}}) {
+         if (! exists $LIB_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $VMD_NO_LIB_CELL_PIN{$cell}{$pin} = 1;
+         } elsif ($LIB_PIN_DIRT{$cell}{$pin} ne $PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell direction consistency
+         ####################################################################
+            $VMD_LIB_CELL_PIN_DIRT{$cell}{$pin} = "$PIN_DIRT{$cell}{$pin} =/= $LIB_PIN_DIRT{$cell}{$pin}";
+         }
+         ####################################################################
+         # Check bus width consistency
+         ####################################################################
+         if ((exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin})
+	 && (! exists $LIB_BUS_INFO{$cell} || ! exists $LIB_BUS_INFO{$cell}{$pin})) {
+            $VMD_LIB_CELL_BUS{$cell}{$pin}{'msb'} = "$BUS_INFO{$cell}{$pin}{'msb'} : 1";
+            $VMD_LIB_CELL_BUS{$cell}{$pin}{'lsb'} = "$BUS_INFO{$cell}{$pin}{'lsb'} : 1";
+         } elsif ((! exists $BUS_INFO{$cell} || ! exists $BUS_INFO{$cell}{$pin})
+         && (exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin})) {
+            $VMD_LIB_CELL_BUS{$cell}{$pin}{'msb'} = "1 : $LIB_BUS_INFO{$cell}{$pin}{'msb'}";
+            $VMD_LIB_CELL_BUS{$cell}{$pin}{'lsb'} = "1 : $LIB_BUS_INFO{$cell}{$pin}{'lsb'}";
+         } elsif ((exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin})
+         && (exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin})) {
+            $vmd_msb = $BUS_INFO{$cell}{$pin}{'msb'};
+            $vmd_lsb = $BUS_INFO{$cell}{$pin}{'lsb'};
+            $lib_msb = $LIB_BUS_INFO{$cell}{$pin}{'msb'};
+            $lib_lsb = $LIB_BUS_INFO{$cell}{$pin}{'lsb'};
+            $VMD_LIB_CELL_BUS{$cell}{$pin}{'msb'} = "$vmd_msb : $lib_msb" if $lib_msb ne $vmd_msb;
+            $VMD_LIB_CELL_BUS{$cell}{$pin}{'lsb'} = "$vmd_lsb : $lib_lsb" if $lib_lsb ne $vmd_lsb;
+         }
+      }
+      foreach $pin (sort keys %{$VMD_FUNC_INFO{$cell}}) {
+         ####################################################################
+         # Check output pin function existency
+         ####################################################################
+         if (! exists $LIB_FUNC_INFO{$cell}{$pin} && $PIN_DIRT{$cell}{$pin} ne 'i') {
+            $VMD_NO_LIB_FUNC{$cell}{$pin} = 1;
+         }
+      }
+      foreach $ipin (sort keys %{$VMD_ARC_INFO{$cell}}) {
+         foreach $opin (sort keys %{$VMD_ARC_INFO{$cell}{$ipin}}) {
+            #################################################################
+            # Check timing arc consistency
+            #################################################################
+            if (! exists $LIB_ARC_INFO{$cell}{$ipin}{$opin}) {
+               $VMD_NO_LIB_ARC{$cell}{$ipin}{$opin} = 1;
+            }
+            #################################################################
+            # Check timing arc condition consistency
+            #################################################################
+            if (! exists $VMD_ARC_COND{$cell}{$ipin}{$opin} && ! exists $LIB_ARC_COND{$cell}{$ipin}{$opin}) {
+            } elsif (exists $VMD_ARC_COND{$cell}{$ipin}{$opin} && ! exists $LIB_ARC_COND{$cell}{$ipin}{$opin}) {
+               $VMD_NO_LIB_ARCCOND{$cell}{$ipin}{$opin} = $VMD_ARC_COND{$cell}{$ipin}{$opin};
+            } elsif (! exists $VMD_ARC_COND{$cell}{$ipin}{$opin} && exists $LIB_ARC_COND{$cell}{$ipin}{$opin}) {
+               $LIB_NO_VMD_ARCCOND{$cell}{$ipin}{$opin} = $LIB_ARC_COND{$cell}{$ipin}{$opin};
+            } elsif ($VMD_ARC_COND{$cell}{$ipin}{$opin} ne $LIB_ARC_COND{$cell}{$ipin}{$opin}) {
+               $VMD_NE_LIB_ARCCOND{$cell}{$ipin}{$opin} = "$VMD_ARC_COND{$cell}{$ipin}{$opin} =/= $LIB_ARC_COND{$cell}{$ipin}{$opin}";
+            }
+         }
+      }
+      foreach $ipin (sort keys %{$LIB_ARC_INFO{$cell}}) {
+         foreach $opin (sort keys %{$LIB_ARC_INFO{$cell}{$ipin}}) {
+            if (! exists $VMD_ARC_INFO{$cell}{$ipin}{$opin}) {
+               $LIB_NO_VMD_ARC{$cell}{$ipin}{$opin} = 1;
+            }
+            if (! exists $LIB_INT_PWR_INFO{$cell}{$ipin}{$opin}) {
+               $NO_LIB_INT_PWR_INFO{$cell}{$ipin}{$opin} = 1;
+
+            }
+         }
+      }
+   }
+   foreach $cell (sort keys %LIB_PIN_DIRT) {
+      if (! exists $CELL_LIST{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $LIB_NO_VMD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$LIB_PIN_DIRT{$cell}}) {
+         if (! exists $PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LIB_NO_VMD_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+   #################################################################
+   # Check timing check consistency
+   #################################################################
+   foreach $cell (sort keys %VMD_CHK_INFO) {
+      foreach $type (sort keys %{$VMD_CHK_INFO{$cell}}) {
+         foreach $timing_chk (sort keys %{$VMD_CHK_INFO{$cell}{$type}}) {
+            if (! exists $LIB_CHK_INFO{$cell} || ! exists $LIB_CHK_INFO{$cell}{$type}
+	    ||  ! exists $LIB_CHK_INFO{$cell}{$type}{$timing_chk}) {
+               $VMD_NO_LIB_CHK{$cell}{$type}{$timing_chk} = 1;
+            }
+         }
+      }
+   }
+   foreach $cell (sort keys %LIB_CHK_INFO) {
+      foreach $type (sort keys %{$LIB_CHK_INFO{$cell}}) {
+         foreach $timing_chk (sort keys %{$LIB_CHK_INFO{$cell}{$type}}) {
+            if (! exists $VMD_CHK_INFO{$cell} || ! exists $VMD_CHK_INFO{$cell}{$type}
+            ||  ! exists $VMD_CHK_INFO{$cell}{$type}{$timing_chk}) {
+               $LIB_NO_VMD_CHK{$cell}{$type}{$timing_chk} = 1;
+            }
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 8) Check consistency between Verilog Library Model and LEF File
+ ###############################################################################
+if ($#VMD_FILES >= 0 && $#LEF_FILES >= 0) {
+   foreach $cell (sort keys %CELL_LIST) {
+      if (! exists $LEF_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $VMD_NO_LEF_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$PIN_DIRT{$cell}}) {
+         if (! exists $LEF_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $VMD_NO_LEF_CELL_PIN{$cell}{$pin} = 1;
+         } elsif ($LEF_PIN_DIRT{$cell}{$pin} ne $PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell direction consistency
+         ####################################################################
+            $VMD_LEF_CELL_PIN_DIRT{$cell}{$pin} = "$PIN_DIRT{$cell}{$pin} =/= $LEF_PIN_DIRT{$cell}{$pin}";
+         }
+         ####################################################################
+         # Check bus width consistency
+         ####################################################################
+         if ((exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin})
+	 && (! exists $LEF_BUS_INFO{$cell} || ! exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $VMD_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "$BUS_INFO{$cell}{$pin}{'msb'} : 1";
+            $VMD_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "$BUS_INFO{$cell}{$pin}{'lsb'} : 1";
+         } elsif ((! exists $BUS_INFO{$cell} || ! exists $BUS_INFO{$cell}{$pin})
+         && (exists $LEF_BUS_INFO{$cell} && exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $VMD_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "1 : $LEF_BUS_INFO{$cell}{$pin}{'msb'}";
+            $VMD_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "1 : $LEF_BUS_INFO{$cell}{$pin}{'lsb'}";
+         } elsif ((exists $BUS_INFO{$cell} && exists $BUS_INFO{$cell}{$pin})
+         && (exists $LEF_BUS_INFO{$cell} && exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $vmd_msb = $BUS_INFO{$cell}{$pin}{'msb'};
+            $vmd_lsb = $BUS_INFO{$cell}{$pin}{'lsb'};
+            $lef_msb = $LEF_BUS_INFO{$cell}{$pin}{'msb'};
+            $lef_lsb = $LEF_BUS_INFO{$cell}{$pin}{'lsb'};
+            $VMD_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "$vmd_msb : $lef_msb" if $lef_msb ne $vmd_msb;
+            $VMD_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "$vmd_lsb : $lef_lsb" if $lef_lsb ne $vmd_lsb;
+         }
+      }
+   }
+   foreach $cell (sort keys %LEF_PIN_DIRT) {
+      if (! exists $CELL_LIST{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $LEF_NO_VMD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$PIN_DIRT{$cell}}) {
+         if (! exists $PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LEF_NO_VMD_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+}
+
+ ###############################################################################
+ # 9) Check consistency between Liberty Library Model and LEF File
+ ###############################################################################
+if ($#LIB_FILES >= 0 && $#LEF_FILES >= 0) {
+   foreach $cell (sort keys %LIB_PIN_DIRT) {
+      if (! exists $LEF_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $LIB_NO_LEF_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$LIB_PIN_DIRT{$cell}}) {
+         if (! exists $LEF_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LIB_NO_LEF_CELL_PIN{$cell}{$pin} = 1;
+         } elsif ($LEF_PIN_DIRT{$cell}{$pin} ne $LIB_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell direction consistency
+         ####################################################################
+            $LIB_LEF_CELL_PIN_DIRT{$cell}{$pin} = "$LIB_PIN_DIRT{$cell}{$pin} =/= $LEF_PIN_DIRT{$cell}{$pin}";
+         }
+         ####################################################################
+         # Check bus width consistency
+         ####################################################################
+         if ((exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin})
+	 && (! exists $LEF_BUS_INFO{$cell} || ! exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $LIB_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "$LIB_BUS_INFO{$cell}{$pin}{'msb'} : 1";
+            $LIB_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "$LIB_BUS_INFO{$cell}{$pin}{'lsb'} : 1";
+         } elsif ((! exists $LIB_BUS_INFO{$cell} || ! exists $LIB_BUS_INFO{$cell}{$pin})
+         && (exists $LEF_BUS_INFO{$cell} && exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $LIB_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "1 : $LEF_BUS_INFO{$cell}{$pin}{'msb'}";
+            $LIB_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "1 : $LEF_BUS_INFO{$cell}{$pin}{'lsb'}";
+         } elsif ((exists $LIB_BUS_INFO{$cell} && exists $LIB_BUS_INFO{$cell}{$pin})
+         && (exists $LEF_BUS_INFO{$cell} && exists $LEF_BUS_INFO{$cell}{$pin})) {
+            $lib_msb = $LIB_BUS_INFO{$cell}{$pin}{'msb'};
+            $lib_lsb = $LIB_BUS_INFO{$cell}{$pin}{'lsb'};
+            $lef_msb = $LEF_BUS_INFO{$cell}{$pin}{'msb'};
+            $lef_lsb = $LEF_BUS_INFO{$cell}{$pin}{'lsb'};
+            $LIB_LEF_CELL_BUS{$cell}{$pin}{'msb'} = "$lib_msb : $lef_msb" if $lef_msb ne $lib_msb;
+            $LIB_LEF_CELL_BUS{$cell}{$pin}{'lsb'} = "$lib_lsb : $lef_lsb" if $lef_lsb ne $lib_lsb;
+         }
+      }
+   }
+   foreach $cell (sort keys %LEF_PIN_DIRT) {
+      if (! exists $LIB_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $LEF_NO_LIB_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$LEF_PIN_DIRT{$cell}}) {
+         if (! exists $LIB_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LEF_NO_LIB_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+}
+
+####xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+############################################################################
+#   10) Check  consistency between IP List and Layout file (CHD FILE) 
+# add by :jessieguo 2014/11/12
+#############################################################################
+if ($#IP_FILES >= 0 && $#CHD_FILES >= 0) {
+   foreach $cell (sort keys %IP_INFO) {
+      if (! exists $CHD_INFO{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $IP_NO_CHD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$IP_INFO{$cell}}) {
+         if (! exists $CHD_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $IP_NO_CHD_CELL_PIN{$cell}{$pin} = 1;
+         }
+       }
+    }
+   foreach $cell (sort keys %CHD_INFO) {
+         if(!exists $IP_INFO{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+	 $CHD_NO_IP_CELL{$cell} = 1;
+      }
+      foreach $pin (sort keys %{$CHD_INFO{$cell}}) {
+         if (exists $IP_INFO{$cell} && ! exists $IP_INFO{$cell}{$pin} && $pin !~ /\[\d+\]/) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $CHD_NO_IP_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+
+ }
+############################################################################
+#   11) Check  consistency between Liberty Library Model and Layout file (CHD FILE) 
+# add by :jessieguo 2014/11/13
+#############################################################################
+if ($#LIB_FILES >= 0 && $#CHD_FILES >= 0) {
+   foreach $cell (sort keys %LIB_PIN_DIRT) {
+      if (! exists $CHD_INFO{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $LIB_NO_CHD_CELL{$cell} = 1;
+         next;
+      }
+    foreach $pin (sort keys %{$LIB_PIN_DIRT{$cell}}) {
+         if (! exists $CHD_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LIB_NO_CHD_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+    }
+   foreach $cell (sort keys %CHD_INFO) {
+      if (! exists $LIB_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $CHD_NO_LIB_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$LIB_PIN_DIRT{$cell}}) {
+         if (! exists $CHD_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $CHD_NO_LIB_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+}
+############################################################################
+#   12) Check  consistency between Verilog Library Model and Layout file (CHD FILE) 
+# add by :jessieguo 2014/11/13
+#############################################################################
+if ($#VMD_FILES >= 0 && $#CHD_FILES >= 0) {
+   foreach $cell (sort keys %CELL_LIST) {
+      if (! exists $CHD_INFO{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $VMD_NO_CHD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$PIN_DIRT{$cell}}) {
+         if (! exists $CHD_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $VMD_NO_CHD_CELL_PIN{$cell}{$pin} = 1;
+         }
+     }
+ }
+   foreach $cell (sort keys %CHD_INFO) {
+      if (! exists $CELL_LIST{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $CHD_NO_VMD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$PIN_DIRT{$cell}}) {
+         if (! exists $PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $CHD_NO_VMD_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+}
+############################################################################
+#   13) Check  consistency between LEF File and Layout file (CHD FILE) 
+# add by :jessieguo 2014/11/13
+#############################################################################
+if ($#CHD_FILES >= 0 && $#LEF_FILES >= 0) {
+   foreach $cell (sort keys %CHD_INFO) {
+      if (! exists $LEF_PIN_DIRT{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $CHD_NO_LEF_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$CHD_INFO{$cell}}) {
+         if (! exists $LEF_PIN_DIRT{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $CHD_NO_LEF_CELL_PIN{$cell}{$pin} = 1;
+         } 
+    }
+}
+   foreach $cell (sort keys %LEF_PIN_DIRT) {
+      if (! exists $CHD_INFO{$cell}) {
+         #######################################################################
+         # Check cell existency
+         #######################################################################
+         $LEF_NO_CHD_CELL{$cell} = 1;
+         next;
+      }
+      foreach $pin (sort keys %{$LEF_PIN_DIRT{$cell}}) {
+         if (! exists $CHD_INFO{$cell}{$pin}) {
+         ####################################################################
+         # Check cell pin consistency
+         ####################################################################
+            $LEF_NO_CHD_CELL_PIN{$cell}{$pin} = 1;
+         }
+      }
+   }
+}
+
+####xxxxxxxxxxxxxxxxxADD END HERE xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+foreach $cell (sort keys %LIB_PIN_DIRT) {
+   ##########################################################################
+   # Check leakage power info existence
+   ##########################################################################
+   if(!exists $main::LIB_LKG_PWR_INFO{$cell}) {
+      $NO_LIB_LKG_PWR_INFO{$cell} = 1;
+   }
+
+   ##########################################################################
+   # Check area info existence
+   ##########################################################################
+   if (! exists $LIB_AREA_INFO{$cell}) {
+      $NO_LIB_AREA_INFO{$cell} = 1;
+   }
+}
+
+ ###############################################################################
+ # Write Output Log File
+ ###############################################################################
+$grp_id = 0;
+if (defined %IP_NO_VMD_CELL
+||  defined %IP_NO_VMD_CELL_PIN		|| defined %VMD_NO_IP_CELL_PIN
+||  defined %IP_NO_VMD_ARC		|| defined %VMD_NO_IP_ARC
+||  defined %IP_NO_VMD_CHK              || defined %VMD_NO_IP_CHK
+||  defined %IP_VMD_CELL_PIN_DIRT	|| defined %IP_VMD_CELL_BUS) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent IP List and Verilog Library\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %IP_NO_VMD_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in IP List but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %IP_NO_VMD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if (defined %IP_NO_VMD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in IP List but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_VMD_CELL_PIN) {
+      foreach $pin (sort keys %{$IP_NO_VMD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %VMD_NO_IP_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Verilog Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_IP_CELL_PIN) {
+      foreach $pin (sort keys %{$VMD_NO_IP_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_VMD_CELL_PIN_DIRT) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Pin Direction Conflict between IP List and Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_VMD_CELL_PIN_DIRT) {
+      foreach $pin (sort keys %{$IP_VMD_CELL_PIN_DIRT{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	$IP_VMD_CELL_PIN_DIRT{$cell}{$pin}\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_VMD_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Bus Width Conflict between IP List and Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_VMD_CELL_BUS) {
+      foreach $pin (sort keys %{$IP_VMD_CELL_BUS{$cell}}) {
+         foreach $idx (sort keys %{$IP_VMD_CELL_BUS{$cell}{$pin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	($idx)	$IP_VMD_CELL_BUS{$cell}{$pin}{$idx}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_NO_VMD_ARC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc in IP List but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_VMD_ARC) {
+      foreach $ipin (sort keys %{$IP_NO_VMD_ARC{$cell}}) {
+         foreach $opin (sort keys %{$IP_NO_VMD_ARC{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %VMD_NO_IP_ARC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc in Verilog Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_IP_ARC) {
+      foreach $ipin (sort keys %{$VMD_NO_IP_ARC{$cell}}) {
+         foreach $opin (sort keys %{$VMD_NO_IP_ARC{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %IP_NO_VMD_CHK) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Check in IP List but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_VMD_CHK) {
+      foreach $type (sort keys %{$IP_NO_VMD_CHK{$cell}}) {
+         foreach $timing_chk (sort keys %{$IP_NO_VMD_CHK{$cell}{$type}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Type : $type	Timing Check : $timing_chk\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %VMD_NO_IP_CHK) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Check in Verilog Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_IP_CHK) {
+      foreach $type (sort keys %{$VMD_NO_IP_CHK{$cell}}) {
+         foreach $timing_chk (sort keys %{$VMD_NO_IP_CHK{$cell}{$type}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Type : $type	Timing Check : $timing_chk\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+####xxxxxxxxxxxxxxxxxADDED BY jessieguo 2014/11/13xxxxxxxxxxxxxxxxxxx
+###report inconsistent between IP list and CHD file ###############
+####################################################################
+if (defined %IP_NO_CHD_CELL ||  defined %IP_NO_CHD_CELL_PIN || defined %CHD_NO_IP_CELL_PIN
+||  defined %CHD_NO_IP_CELL) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent IP List and Layout Library (CHD file)\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %IP_NO_CHD_CELL) {
+    $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in IP List but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %IP_NO_CHD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if (defined %IP_NO_CHD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in IP List but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_CHD_CELL_PIN) {
+      foreach $pin (sort keys %{$IP_NO_CHD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_IP_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Layout Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_IP_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt++;
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_IP_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Layout Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_IP_CELL_PIN) {
+      foreach $pin (sort keys %{$CHD_NO_IP_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+####################################################################
+###report inconsistent between Liberty Library Model and CHD file ##
+####################################################################
+if (defined %LIB_NO_CHD_CELL ||  defined %LIB_NO_CHD_CELL_PIN || defined %CHD_NO_LIB_CELL_PIN
+||  defined %CHD_NO_LIB_CELL) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Liberty Library Model and Layout Library (CHD file)\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %LIB_NO_CHD_CELL) {
+    $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library Model but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_CHD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if (defined %LIB_NO_CHD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Liberty Library Model but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_CHD_CELL_PIN) {
+      foreach $pin (sort keys %{$LIB_NO_CHD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_LIB_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Layout Library but not in Liberty Library Model\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_LIB_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt++;
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_LIB_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Layout Library but not in Liberty Library Model\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_LIB_CELL_PIN) {
+      foreach $pin (sort keys %{$CHD_NO_LIB_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+####xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+###report inconsistent between Verilog Library Model and CHD file ##
+####################################################################
+if (defined %VMD_NO_CHD_CELL ||  defined %VMD_NO_CHD_CELL_PIN || defined %CHD_NO_VMD_CELL_PIN
+||  defined %CHD_NO_VMD_CELL) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Library Model and Layout Library (CHD file)\n";
+   print LOGF "#","="x79,"\n";
+}
+if ($#IP_FILES>0  && defined %VMD_NO_CHD_CELL) {
+    $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Verilog Library Model but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_CHD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES<0  && defined %VMD_NO_CHD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Verilog Library Model but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_CHD_CELL_PIN) {
+      foreach $pin (sort keys %{$VMD_NO_CHD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_VMD_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Layout Library but not in Verilog Library Model\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_VMD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt++;
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_VMD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Layout Library but not in Verilog Library Model\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_VMD_CELL_PIN) {
+      foreach $pin (sort keys %{$CHD_NO_VMD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+####xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+###report inconsistent between LEF file and CHD file ##
+####################################################################
+if (defined %LEF_NO_CHD_CELL ||  defined %LEF_NO_CHD_CELL_PIN || defined %CHD_NO_LEF_CELL_PIN
+||  defined %CHD_NO_LEF_CELL) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent LEF file and Layout Library (CHD file)\n";
+   print LOGF "#","="x79,"\n";
+}
+if ($#IP_FILES<0  && defined %LEF_NO_CHD_CELL) {
+    $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in LEF file but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_CHD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES<0  && defined %LEF_NO_CHD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in LEF file but not in Layout Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_CHD_CELL_PIN) {
+      foreach $pin (sort keys %{$LEF_NO_CHD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_LEF_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Layout Library but not in LEF file\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_LEF_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt++;
+   }
+   print LOGF "\n";
+}
+if (defined %CHD_NO_LEF_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Layout Library but not in LEF file\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %CHD_NO_LEF_CELL_PIN) {
+      foreach $pin (sort keys %{$CHD_NO_LEF_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+
+####xxxxxxxxxxxxxxxxADD END HERE jessieguo 2014/11/13xxxxxxxxxxxxxxxxx
+
+
+if (defined %IP_NO_LIB_CELL
+||  defined %IP_NO_LIB_CELL_PIN		|| defined %LIB_NO_IP_CELL_PIN
+||  defined %IP_NO_LIB_CHK		|| defined %LIB_NO_IP_CHK
+||  defined %IP_NO_LIB_ARC		|| defined %LIB_NO_IP_ARC
+||  defined %IP_LIB_CELL_PIN_DIRT	|| defined %IP_LIB_CELL_BUS
+||  defined %LIB_NO_IP_CELL) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent IP List and Liberty Library\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %IP_NO_LIB_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in IP List but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %IP_NO_LIB_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if (defined %IP_NO_LIB_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in IP List but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_LIB_CELL_PIN) {
+      foreach $pin (sort keys %{$IP_NO_LIB_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %LIB_NO_IP_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_IP_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt++;
+   }
+   print LOGF "\n";
+}
+if (defined %LIB_NO_IP_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Liberty Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_IP_CELL_PIN) {
+      foreach $pin (sort keys %{$LIB_NO_IP_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_LIB_CELL_PIN_DIRT) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Pin Direction Conflict between IP List and Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_LIB_CELL_PIN_DIRT) {
+      foreach $pin (sort keys %{$IP_LIB_CELL_PIN_DIRT{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	$IP_LIB_CELL_PIN_DIRT{$cell}{$pin}\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_LIB_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Bus Width Conflict between IP List and Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_LIB_CELL_BUS) {
+      foreach $pin (sort keys %{$IP_LIB_CELL_BUS{$cell}}) {
+         foreach $idx (sort keys %{$IP_LIB_CELL_BUS{$cell}{$pin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	($idx)	$IP_LIB_CELL_BUS{$cell}{$pin}{$idx}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_NO_LIB_ARC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc in IP List but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_LIB_ARC) {
+      foreach $ipin (sort keys %{$IP_NO_LIB_ARC{$cell}}) {
+         foreach $opin (sort keys %{$IP_NO_LIB_ARC{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %LIB_NO_IP_ARC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc in Liberty Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_IP_ARC) {
+      foreach $ipin (sort keys %{$LIB_NO_IP_ARC{$cell}}) {
+         foreach $opin (sort keys %{$LIB_NO_IP_ARC{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %IP_NO_LIB_CHK) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Check in IP List but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_LIB_CHK) {
+      foreach $type (sort keys %{$IP_NO_LIB_CHK{$cell}}) {
+         foreach $timing_chk (sort keys %{$IP_NO_LIB_CHK{$cell}{$type}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Type : $type	Timing Check : $timing_chk\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %LIB_NO_IP_CHK) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Check in Liberty Library but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_IP_CHK) {
+      foreach $type (sort keys %{$LIB_NO_IP_CHK{$cell}}) {
+         foreach $timing_chk (sort keys %{$LIB_NO_IP_CHK{$cell}{$type}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Type : $type	Timing Check : $timing_chk\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+
+if (defined %IP_NO_LEF_CELL
+||  defined %IP_NO_LEF_CELL_PIN		|| defined %LEF_NO_IP_CELL_PIN
+||  defined %IP_LEF_CELL_PIN_DIRT	|| defined %IP_LEF_CELL_BUS) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent IP List and LEF File\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %IP_NO_LEF_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in IP List but not in LEF File\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %IP_NO_LEF_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if (defined %IP_NO_LEF_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in IP List but not in LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_NO_LEF_CELL_PIN) {
+      foreach $pin (sort keys %{$IP_NO_LEF_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %LEF_NO_IP_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in LEF File but not in IP List\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_IP_CELL_PIN) {
+      foreach $pin (sort keys %{$LEF_NO_IP_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_LEF_CELL_PIN_DIRT) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Pin Direction Conflict between IP List and LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_LEF_CELL_PIN_DIRT) {
+      foreach $pin (sort keys %{$IP_LEF_CELL_PIN_DIRT{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	$IP_LEF_CELL_PIN_DIRT{$cell}{$pin}\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %IP_LEF_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Bus Width Conflict between IP List and LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %IP_LEF_CELL_BUS) {
+      foreach $pin (sort keys %{$IP_LEF_CELL_BUS{$cell}}) {
+         foreach $idx (sort keys %{$IP_LEF_CELL_BUS{$cell}{$pin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	($idx)	$IP_LEF_CELL_BUS{$cell}{$pin}{$idx}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+   print LOGF "\n";
+}
+
+
+if (defined %MISS_VMD_CELL || defined %MISS_VMD_CELL_PIN || defined %NEQU_VMD_CELL_BUS) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Design and Verilog Library\n";
+}
+if (defined %MISS_VMD_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Non-exists Verilog Library Models in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %MISS_VMD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+      foreach $mod (sort keys %{$MISS_VMD_CELL{$cell}}) {
+         foreach $inst (sort keys %{$MISS_VMD_CELL{$cell}{$mod}}) {
+            print LOGF "\t$mod	$inst\n";
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %MISS_VMD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Non-exists Verlog Library Cell Pins in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %MISS_VMD_CELL_PIN) {
+      foreach $pin (sort keys %{$MISS_VMD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+         foreach $mod (sort keys %{$MISS_VMD_CELL_PIN{$cell}{$pin}}) {
+            foreach $inst (sort keys %{$MISS_VMD_CELL_PIN{$cell}{$pin}{$mod}}) {
+               print LOGF "\t$mod	$inst.$pin	($cell)\n";
+            }
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %NEQU_VMD_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent Verilog Library Cell Pin Width in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %NEQU_VMD_CELL_BUS) {
+      foreach $pin (sort keys %{$NEQU_VMD_CELL_BUS{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+         foreach $mod (sort keys %{$NEQU_VMD_CELL_BUS{$cell}{$pin}}) {
+            foreach $inst (sort keys %{$NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}}) {
+               foreach $idx (sort keys %{$NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}{$inst}}) {
+                  print LOGF "\t$mod	$inst	($idx)	$NEQU_VMD_CELL_BUS{$cell}{$pin}{$mod}{$inst}{$idx}\n";
+               }
+            }
+         }
+      }
+   }
+   print LOGF "\n";
+}
+
+
+if (defined %MISS_LIB_CELL || defined %MISS_LIB_CELL_PIN || defined %NEQU_LIB_CELL_BUS) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Design and Liberty Library\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %MISS_LIB_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Non-exists Liberty Library Models in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %MISS_LIB_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+      foreach $mod (sort keys %{$MISS_LIB_CELL{$cell}}) {
+         foreach $inst (sort keys %{$MISS_LIB_CELL{$cell}{$mod}}) {
+            print LOGF "\t$mod	$inst\n";
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %MISS_LIB_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Non-exists Liberty Library Cell Pins in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %MISS_LIB_CELL_PIN) {
+      foreach $pin (sort keys %{$MISS_LIB_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+         foreach $mod (sort keys %{$MISS_LIB_CELL_PIN{$cell}{$pin}}) {
+            foreach $inst (sort keys %{$MISS_LIB_CELL_PIN{$cell}{$pin}{$mod}}) {
+               print LOGF "\t$mod	$inst.$pin	($cell)\n";
+            }
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %NEQU_LIB_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent Liberty Library Cell Pin Width in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %NEQU_LIB_CELL_BUS) {
+      foreach $pin (sort keys %{$NEQU_LIB_CELL_BUS{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+         foreach $mod (sort keys %{$NEQU_LIB_CELL_BUS{$cell}{$pin}}) {
+            foreach $inst (sort keys %{$NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}}) {
+               foreach $idx (sort keys %{$NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}{$inst}}) {
+                  print LOGF "\t$mod	$inst	($idx)	$NEQU_LIB_CELL_BUS{$cell}{$pin}{$mod}{$inst}{$idx}\n";
+               }
+            }
+         }
+      }
+   }
+   print LOGF "\n";
+}
+
+
+if (defined %MISS_LEF_CELL || defined %MISS_LEF_CELL_PIN || defined %NEQU_LEF_CELL_BUS) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Design and LEF File\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %MISS_LEF_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Non-exists LEF Cells in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %MISS_LEF_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+      foreach $mod (sort keys %{$MISS_LEF_CELL{$cell}}) {
+         foreach $inst (sort keys %{$MISS_LEF_CELL{$cell}{$mod}}) {
+            print LOGF "\t$mod	$inst\n";
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %MISS_LEF_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Non-exists LEF Cell Pins in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %MISS_LEF_CELL_PIN) {
+      foreach $pin (sort keys %{$MISS_LEF_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+         foreach $mod (sort keys %{$MISS_LEF_CELL_PIN{$cell}{$pin}}) {
+            foreach $inst (sort keys %{$MISS_LEF_CELL_PIN{$cell}{$pin}{$mod}}) {
+               print LOGF "\t$mod	$inst.$pin	($cell)\n";
+            }
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if (defined %NEQU_LEF_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent LEF Cell Pin Width in Verilog Design\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %NEQU_LEF_CELL_BUS) {
+      foreach $pin (sort keys %{$NEQU_LEF_CELL_BUS{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+         foreach $mod (sort keys %{$NEQU_LEF_CELL_BUS{$cell}{$pin}}) {
+            foreach $inst (sort keys %{$NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}}) {
+               foreach $idx (sort keys %{$NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}{$inst}}) {
+                  print LOGF "\t$mod	$inst	($idx)	$NEQU_LEF_CELL_BUS{$cell}{$pin}{$mod}{$inst}{$idx}\n";
+               }
+            }
+         }
+      }
+   }
+   print LOGF "\n";
+}
+
+
+#VIA IP internal power is based on CLK, not all pins
+foreach $cell (sort keys %LIB_PIN_DIRT) {
+
+    if (! exists $LIB_INT_PWR_INFO{$cell}) {
+
+        $NO_LIB_INT_PWR_INFO{$cell} = 1;
+    }
+}
+
+if (defined %main::OPIN_NO_MAX_CAP || defined %main::LIB_NO_IN_TH_PCT_RISE || defined $LIB_NO_SL_LO_TH_PCT_RISE ||defined %NO_LIB_LKG_PWR_INFO || defined %NO_LIB_INT_PWR_INFO || defined %NO_LIB_AREA_INFO || defined %main::LIB_NO_LKG_PWR_UNIT
+    || defined %main::LIB_NO_OP_CONDITION 
+    || defined %main::LIB_NO_DEFAULT_OP_CONDITION || defined %main::FILENAME_NO_EQ_LIBNAME || defined %main::LIBNAME_NO_EQ_FILENAME
+    || defined %main::LIB_VOLT_NO_CONSISTENT
+    || defined  %main::LIB_TEMP_NO_CONSISTENT
+    || defined  %main::LIB_PROCESS_NO_MATCH ) 
+{
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Liberty Library Checking Items\n";
+   print LOGF "#","="x79,"\n";
+}
+##################################
+#check filename and library name
+if (defined %FILENAME_NO_EQ_LIBNAME) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent between the file name and the library name\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %FILENAME_NO_EQ_LIBNAME) {
+      print LOGF "$lib_cnt)   The File name of the lib : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+#check voltage
+if (defined %LIB_VOLT_NO_CONSISTENT) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent the voltage define(file/libray/nom_voltage/voltage/conditions) \n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_VOLT_NO_CONSISTENT) {
+      print LOGF "$lib_cnt)   LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+#check temprature
+if (defined %LIB_TEMP_NO_CONSISTENT) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent the temprature define(file/libray/temperature/conditions)\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_TEMP_NO_CONSISTENT) {
+      print LOGF "$lib_cnt)   LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+#check process
+if (defined %LIB_PROCESS_NO_MATCH) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Inconsistent the corner define(file/libray/conditions)\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_PROCESS_NO_MATCH) {
+      print LOGF "$lib_cnt)   LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+
+##################################
+
+if (defined %LIB_NO_OP_CONDITION) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Liberty Library without operation conditions\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_NO_OP_CONDITION) {
+      print LOGF "$lib_cnt)	LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if (defined %LIB_NO_DEFAULT_OP_CONDITION) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Liberty Library without default operation conditions\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_NO_DEFAULT_OP_CONDITION) {
+      print LOGF "$lib_cnt)	LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if (defined %LIB_NO_LKG_PWR_UNIT) {
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Liberty Library without Leakage Power Unit\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_NO_LKG_PWR_UNIT) {
+      $lib_unit = $main::LIB_LKG_PWR_UNIT{$lib};
+      print LOGF "$lib_cnt)	LIB : $lib $lib_unit\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if (defined %NO_LIB_INT_PWR_INFO) {
+   #$test=keys %NO_LIB_INT_PWR_INFO;
+   #print "xxxxxxxx $test\n";
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library without Internal Power Information\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 0;
+   #foreach $cell (sort keys %NO_LIB_INT_PWR_INFO) {
+   #   foreach $ipin (sort keys %{$NO_LIB_INT_PWR_INFO{$cell}}) {
+   #      foreach $opin (sort keys %{$NO_LIB_INT_PWR_INFO{$cell}{$ipin}}) {
+   #         print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+   #         $pin_cnt ++;
+   #      }
+   #   }
+   #}
+   #foreach $cell (sort keys %NO_LIB_INT_PWR_INFO) {
+   #   foreach $pin (sort keys %{$NO_LIB_INT_PWR_INFO{$cell}}) {
+   #      print LOGF "$pin_cnt)	Cell : $cell : $pin\n";
+   #      $pin_cnt ++;
+   #   }
+   #}
+   foreach $cell (sort keys %NO_LIB_INT_PWR_INFO) {
+      print LOGF "$pin_cnt)	Cell : $cell\n";
+      $pin_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if (defined %NO_LIB_LKG_PWR_INFO) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library without Leakage Power Information\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %NO_LIB_LKG_PWR_INFO) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if (defined %main::OPIN_NO_MAX_CAP) {
+   $item_id++;
+   $cell_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Liberty Library Cell output/inout pin without max_capacity \n";
+   print LOGF "#"x80,"\n";
+   foreach $cell (sort keys %main::OPIN_NO_MAX_CAP) {
+      print LOGF "$cell_cnt)	CELL : $cell\n";
+      $cell_cnt ++;
+      $pin_cnt = 0;
+     foreach $pin (sort keys %{$main::OPIN_NO_MAX_CAP{$cell}}) {
+      next if( exists $main::OPIN_DNT_MAX_CAP{$cell}{$pin});
+      $pin_cnt ++;
+      print LOGF "\t\t$pin_cnt)	PIN : $pin\n";
+      }
+   }
+}
+
+if (defined %LIB_NO_IN_TH_PCT_RISE){
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Liberty Library without input_threshold_pct_rise\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_NO_IN_TH_PCT_RISE) {
+      print LOGF "$lib_cnt)	LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+if (defined %LIB_NO_SL_LO_TH_PCT_RISE){
+   $item_id++;
+   $lib_cnt = 0;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Liberty Library without slew_lower_threshold_pct_rise\n";
+   print LOGF "#"x80,"\n";
+   foreach $lib (sort keys %LIB_NO_SL_LO_TH_PCT_RISE) {
+      print LOGF "$lib_cnt)	LIB : $lib\n";
+      $lib_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if (defined %NO_LIB_AREA_INFO) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library without Area Information\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %NO_LIB_AREA_INFO) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0
+&& (defined %VMD_NO_LIB_CELL		|| defined %LIB_NO_VMD_CELL
+||  defined %VMD_NO_LIB_CELL_PIN	|| defined %LIB_NO_VMD_CELL_PIN
+||  defined %VMD_LIB_CELL_PIN_DIRT	|| defined %VMD_LIB_CELL_BUS
+||  defined %VMD_NO_LIB_ARC		|| defined %LIB_NO_VMD_ARC
+||  defined %VMD_NO_LIB_ARCCOND		|| defined %LIB_NO_VMD_ARCCOND
+||  defined %VMD_NO_LIB_CHK		|| defined %LIB_NO_VMD_CHK
+||  defined %VMD_NO_LIB_FUNC
+||  defined %VMD_NE_LIB_ARCCOND)) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Library and Liberty Library\n";
+   print LOGF "#","="x79,"\n";
+}
+if ($#IP_FILES > 0 && $#DESIGN_FILES < 0 && defined %VMD_NO_LIB_CELL) {
+#if ( defined %VMD_NO_LIB_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Verilog Library but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LIB_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LIB_NO_VMD_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_VMD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_NO_LIB_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Verilog Library but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LIB_CELL_PIN) {
+      foreach $pin (sort keys %{$VMD_NO_LIB_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LIB_NO_VMD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Liberty Library but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_VMD_CELL_PIN) {
+      foreach $pin (sort keys %{$LIB_NO_VMD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_LIB_CELL_PIN_DIRT) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Pin Direction Conflict between Verilog Library and Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_LIB_CELL_PIN_DIRT) {
+      foreach $pin (sort keys %{$VMD_LIB_CELL_PIN_DIRT{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	$VMD_LIB_CELL_PIN_DIRT{$cell}{$pin}\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_LIB_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Bus Width Conflict between Verilog Library and Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_LIB_CELL_BUS) {
+      foreach $pin (sort keys %{$VMD_LIB_CELL_BUS{$cell}}) {
+         foreach $idx (sort keys %{$VMD_LIB_CELL_BUS{$cell}{$pin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	($idx)	$VMD_LIB_CELL_BUS{$cell}{$pin}{$idx}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+   print LOGF "\n";
+}
+if ($#DESIGN_FILES >= 0
+&& (defined %VMD_NO_LIB_ARC		|| defined %LIB_NO_VMD_ARC
+||  defined %VMD_NO_LIB_ARCCOND		|| defined %LIB_NO_VMD_ARCCOND
+||  defined %VMD_NO_LIB_CHK		|| defined %LIB_NO_VMD_CHK
+||  defined %VMD_NO_LIB_FUNC
+||  defined %VMD_NE_LIB_ARCCOND)) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Library and Liberty Library\n";
+   print LOGF "#","="x79,"\n";
+}
+if (defined %VMD_NO_LIB_FUNC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Function Missed in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LIB_FUNC) {
+      foreach $pin (sort keys %{$VMD_NO_LIB_FUNC{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+}
+if (defined %VMD_NO_LIB_CHK) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Check in Verilog Library but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LIB_CHK) {
+      foreach $type (sort keys %{$VMD_NO_LIB_CHK{$cell}}) {
+         foreach $timing_chk (sort keys %{$VMD_NO_LIB_CHK{$cell}{$type}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Type : $type	Timing Check : $timing_chk\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %LIB_NO_VMD_CHK) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Check in Liberty Library but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_VMD_CHK) {
+      foreach $type (sort keys %{$LIB_NO_VMD_CHK{$cell}}) {
+         foreach $timing_chk (sort keys %{$LIB_NO_VMD_CHK{$cell}{$type}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Type : $type	Timing Check : $timing_chk\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %VMD_NO_LIB_ARC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc in Verilog Library but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LIB_ARC) {
+      foreach $ipin (sort keys %{$VMD_NO_LIB_ARC{$cell}}) {
+         foreach $opin (sort keys %{$VMD_NO_LIB_ARC{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %LIB_NO_VMD_ARC) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc in Liberty Library but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_VMD_ARC) {
+      foreach $ipin (sort keys %{$LIB_NO_VMD_ARC{$cell}}) {
+         foreach $opin (sort keys %{$LIB_NO_VMD_ARC{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %VMD_NO_LIB_ARCCOND) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc Condition in Verilog Library but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LIB_ARCCOND) {
+      foreach $ipin (sort keys %{$VMD_NO_LIB_ARCCOND{$cell}}) {
+         foreach $opin (sort keys %{$VMD_NO_LIB_ARCCOND{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin Cond: $VMD_NO_LIB_ARCCOND{$cell}{$ipin}{$opin}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %LIB_NO_VMD_ARCCOND) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc Condition in Liberty Library but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_VMD_ARCCOND) {
+      foreach $ipin (sort keys %{$LIB_NO_VMD_ARCCOND{$cell}}) {
+         foreach $opin (sort keys %{$LIB_NO_VMD_ARCCOND{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin Cond: $LIB_NO_VMD_ARCCOND{$cell}{$ipin}{$opin}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+if (defined %VMD_NE_LIB_ARCCOND) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Timing Arc Condition Conflict between Verilog Library and Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NE_LIB_ARCCOND) {
+      foreach $ipin (sort keys %{$VMD_NE_LIB_ARCCOND{$cell}}) {
+         foreach $opin (sort keys %{$VMD_NE_LIB_ARCCOND{$cell}{$ipin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Arc : $ipin=>$opin Cond: $VMD_NE_LIB_ARCCOND{$cell}{$ipin}{$opin}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+}
+
+
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0
+&& (defined %VMD_NO_LEF_CELL || defined %LEF_NO_VMD_CELL || defined %VMD_NO_LEF_CELL_PIN ||
+    defined %LEF_NO_VMD_CELL_PIN || defined %VMD_LEF_CELL_PIN_DIRT || defined %VMD_LEF_CELL_BUS)) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Verilog Library and LEF File\n";
+   print LOGF "#","="x79,"\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_NO_LEF_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Verilog Library but not in LEF File\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LEF_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LEF_NO_VMD_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in LEF File but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_VMD_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_NO_LEF_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Verilog Library but not in LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_NO_LEF_CELL_PIN) {
+      foreach $pin (sort keys %{$VMD_NO_LEF_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LEF_NO_VMD_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in LEF File but not in Verilog Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_VMD_CELL_PIN) {
+      foreach $pin (sort keys %{$LEF_NO_VMD_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_LEF_CELL_PIN_DIRT) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Pin Direction Conflict between Verilog Library and LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_LEF_CELL_PIN_DIRT) {
+      foreach $pin (sort keys %{$VMD_LEF_CELL_PIN_DIRT{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	$VMD_LEF_CELL_PIN_DIRT{$cell}{$pin}\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %VMD_LEF_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Bus Width Conflict between Verilog Library and LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %VMD_LEF_CELL_BUS) {
+      foreach $pin (sort keys %{$VMD_LEF_CELL_BUS{$cell}}) {
+         foreach $pin (sort keys %{$VMD_LEF_CELL_BUS{$cell}{$pin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	($idx)	$VMD_LEF_CELL_BUS{$cell}{$pin}{$idx}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+   print LOGF "\n";
+}
+
+
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0
+&& (defined %LIB_NO_LEF_CELL || defined %LEF_NO_LIB_CELL || defined %LIB_NO_LEF_CELL_PIN ||
+    defined %LEF_NO_LIB_CELL_PIN || defined %LIB_LEF_CELL_PIN_DIRT || defined %LIB_LEF_CELL_BUS)) {
+   $err_Flag = 1;
+   $grp_id++;
+   $item_id = 0;
+   print LOGF "#","="x79,"\n";
+   print LOGF "#	$grp_id)	Inconsistent Liberty Library and LEF File\n";
+   print LOGF "#","="x79,"\n";
+}
+
+
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LIB_NO_LEF_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in Liberty Library but not in LEF File\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_LEF_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LEF_NO_LIB_CELL) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell in LEF File but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $cell_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_LIB_CELL) {
+      print LOGF "$cell_cnt)	Cell : $cell\n";
+      $cell_cnt ++;
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LIB_NO_LEF_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in Liberty Library but not in LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_NO_LEF_CELL_PIN) {
+      foreach $pin (sort keys %{$LIB_NO_LEF_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LEF_NO_LIB_CELL_PIN) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Cell Pins in LEF File but not in Liberty Library\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LEF_NO_LIB_CELL_PIN) {
+      foreach $pin (sort keys %{$LEF_NO_LIB_CELL_PIN{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LIB_LEF_CELL_PIN_DIRT) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Pin Direction Conflict between Liberty Library and LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_LEF_CELL_PIN_DIRT) {
+      foreach $pin (sort keys %{$LIB_LEF_CELL_PIN_DIRT{$cell}}) {
+         print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	$LIB_LEF_CELL_PIN_DIRT{$cell}{$pin}\n";
+         $pin_cnt ++;
+      }
+   }
+   print LOGF "\n";
+}
+if ($#IP_FILES < 0 && $#DESIGN_FILES < 0 && defined %LIB_LEF_CELL_BUS) {
+   $item_id++;
+   print LOGF "#"x80,"\n";
+   print LOGF "#	$grp_id\.$item_id)	Bus Width Conflict between Liberty Library and LEF File\n";
+   print LOGF "#"x80,"\n";
+   $pin_cnt = 1;
+   foreach $cell (sort keys %LIB_LEF_CELL_BUS) {
+      foreach $pin (sort keys %{$LIB_LEF_CELL_BUS{$cell}}) {
+         foreach $idx (sort keys %{$LIB_LEF_CELL_BUS{$cell}{$pin}}) {
+            print LOGF "$pin_cnt)	Cell : $cell	Pin : $pin	($idx)	$LIB_LEF_CELL_BUS{$cell}{$pin}{$idx}\n";
+            $pin_cnt ++;
+         }
+      }
+   }
+   print LOGF "\n";
+}
+
+
+close(LOGF);
+
+print "******--------------------------------------------------******\n";
+print "Output Cross Check Report : $logf\n";
+print "******--------------------------------------------------******\n";
+($s, $m, $h) = localtime(time);print "$h:$m:$s\n\n";
+
+exit $err_Flag;
+
+
+#################################################################################
+# POD
+#################################################################################
+=pod
+
+=head1 NAME
+
+chk_lib - check the consistency among several kinds of database
+
+=head1 SYNOPSIS
+
+./chk_lib                                               \
+        -iplist         input_IP_list                   (optional)      \
+        -design         input_verilog_designs           (optional)      \
+        -vmd            input_verilog_vmd_models        (optional)      \
+        -vmd_list       input_verilog_vmd_model_list    (optional)      \
+        -lib            input_liberty_library_models    (optional)      \
+        -lib_list       input_liberty_library_model_list (optional)     \
+        -lef            input_physical_lef_files        (optional)      \
+        -lef_list       input_physical_lef_file_list     (optional)     \
+        -log            output_log_file
+
+
+=head1 DESCRIPTION
+
+Cross check the consistency among the following database:
+           1) Project IP list
+           2) Verilog designs
+           3) Verilog library models
+           4) Synopsys liberty format library models
+           5) LEF files
+
+        You may use this program to check the following issues:
+           1) Library preparation : To confirm the consistency among project IP
+                                    list and different library models
+           2) Verilog-In netlist  : To confirm the consistency between verilog
+                                    design and LEF files
+           3) Liberty cell function : To check the existency of the function of
+                                      liberty library, especially for pad cells
+
+
+=head1 ARGUMENTS
+
+script takes the following arguments:
+
+=over 4
+
+=item B<-iplist>
+
+input ip list file
+
+=item B<-design>
+
+input verilog designs(gate level)
+
+=item B<-vmd>
+
+input verilog vmd model file
+
+=item B<-vmd_list>
+
+input verilog vmd model list
+
+=item B<-lib>
+
+input liberty library models
+
+=item B<-lib_list>
+
+input liberty library models list
+
+=item B<-lef>
+
+input physical lef file
+
+=item B<-lef_list>
+
+input physical lef files list
+
+=item B<-log>
+
+output log file
+
+=back
+
+=head1 CONFIGURATION
+
+Configuration.
+
+=head2 *** FILE FORMAT
+
+<Example of IP List>:
+        // IP_NAME            : lp_rx           from_vt3290
+        // IP_PIN             : DB4RXCLKH       1       output  normal  same_as_previous_project
+        // IP_TIMING_ARC      : IN => OUT       same_as_previous_project
+        // IP_TIMING_CHECK    : IN => OUT       setup/hold/width
+
+
+=head1 EXPORT
+
+export check report log file
+
+=head1 NOTES
+
+
+
+=head1 EXAMPLE
+
+
+
+=head1 FLOW
+
+ip list flow, library release flow
+
+=head1 KEYWORDS
+
+iplist, consistency, vmd, lef, lib 
+
+=head1 REVISION
+
+$Revision: 1.8 $
+
+=head1 AUTHOR
+
+Bauli & Tengfei
+
+=head1 BUGS
+
+bugs description
+
+=head1 SEE ALSO
+
+related links
+
+=cut
+
+

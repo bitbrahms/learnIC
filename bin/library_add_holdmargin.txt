@@ -1,0 +1,58 @@
+#!/usr/bin/perl
+$file=$ARGV[0];
+#$cell=$ARGV[1];
+$hold_margin=$ARGV[1];
+open ORG_FH, "< $file "||die "Can't open $file:$!";
+open NEW_FH ,"> $file.new"||die "Can't write $file.new:$!";
+
+@lib_org=<ORG_FH>;
+
+
+
+for($i=0;$i<=$#lib_org;$i=$i+1){
+	$line= $lib_org[$i];
+	if ( ($line=~ /^pin\(\"din/i) || ($line=~ /^\s+pin\s*\(wrtag/i) || ($line=~ /^\s+pin\s*\(data_in/i) || ($line=~ /^\s+pin\s*\(shfdin/i) )
+	{
+		#print "Found retain arc \n";
+		$flag=1;
+		push (@lib_new,$line);
+	}elsif ( ($flag == 1) && ($line=~ /hold_rising/i) )
+	{
+		#print "Found hold Arc\n";
+		$flag=2;
+		push (@lib_new,$line);
+	}elsif ( ($flag == 2) && (($line=~ /^\s+\"([\d\.,\s]+)/) || ($line=~ /^\s+values\s*\(\s*\"([\d\.,\s]+)/)) )
+	{	
+		#print "Found values";
+		$ti=$1;
+		@ti_ar=split /,\s*/ ,$ti;
+		@ti_ar_n= ();
+		foreach $t (@ti_ar)
+		{
+			$n_n=$t+$hold_margin;
+			push (@ti_ar_n,$n_n);
+		}my $ti_new=join ", ",@ti_ar_n;
+		#print "$ti_new\n";
+		$line_new=$line;
+		$line_new=~ s/\"([\d.,\s]+)\"/\"$ti_new\"/;
+		#print $line_new;
+		push (@lib_new,$line_new);
+	}elsif( ($line=~ /end\s*of\s*pin/) || ($line=~ /setup_rising/) ){
+		$flag=0;
+		push (@lib_new, $line);
+	}else{
+		push (@lib_new, $line);
+	}
+
+}
+
+foreach $line (@lib_new)
+{
+	print NEW_FH $line;
+}
+
+print "Done\n";
+
+close ORG_FH;
+close NEW_FH;
+#`mv $cell.new $cell`

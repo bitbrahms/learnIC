@@ -1,0 +1,9 @@
+#!/usr/bin/perl -w
+open(load_sub,">load.sub")||die("go shit");
+
+for($i=0;$i<=255;$i=$i+1)
+{  # $num=$i*4;	
+   #	$str=sprintf("%02x","$num");
+		print load_sub "cload_rddata[$i]		rddata[$i]		vss0	cout\ncload_rddatb[$i]		rddatb[$i]		vss0	cout\n";			  
+}
+close (load_sub);

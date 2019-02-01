@@ -1,0 +1,10 @@
+#!/bin/bash
+
+
+for file in `find . -type f -iname "*.power"`
+#	file=1.21.new
+do
+	name=${file%.*}
+	echo $name
+	mv $file $name
+done

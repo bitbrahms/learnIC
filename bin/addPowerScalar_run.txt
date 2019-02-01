@@ -1,0 +1,13 @@
+#!/bin/csh -f
+
+foreach item (`ls *1d3*.lib*`)
+	addPowerScalar.p power.info_1d3 $item
+end
+
+foreach item (`ls *1d0*.lib*`)
+	addPowerScalar.p power.info_1d0 $item
+end
+
+foreach item (`ls *0d65*.lib*`)
+	addPowerScalar.p power.info_0d65 $item
+end

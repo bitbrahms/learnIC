@@ -1,0 +1,18 @@
+#!/bin/csh
+
+if (-d corner_lib) then
+rm -r corner_lib
+endif
+md corner_lib
+
+cp *.lib corner_lib
+cd corner_lib
+
+foreach item (`ls *.lib`)
+set filename = `basename $item .lib`
+#sed -i "s/library\ *\(.*\)\ {/library \($filename\)\ {/" $item
+echo $filename
+end
+
+echo "Done"
+

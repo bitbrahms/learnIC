@@ -1,0 +1,34 @@
+#!/usr/bin/python
+
+import re
+import os
+import sys
+
+library = sys.argv[1]
+flag = 0
+risePower = 0
+fallPower = 0
+library_new = open(library + '.new', 'w')
+with open(library, 'r') as file:
+	for line in file:
+		if (re.match('\s*internal_power', line)):
+			flag = 1
+		elif ((flag == 1) and re.match('\s*rise_power', line)):
+			risePower = 1
+		elif ((flag == 1) and re.match('\s*fall_power', line)):
+			fallPower = 1
+		elif ( (flag == 1) and (risePower == 1) and re.match('\s+}', line) ) :
+			risePower = 0
+		elif ( (flag == 1) and (fallPower == 1) and re.match('\s+}', line) ):
+			fallPower = 0
+		elif ( (flag == 1)  and (risePower == 0) and (fallPower == 0) and re.match('\s+}', line) ):
+			flag = 0
+		elif (flag == 1):
+			continue
+		else:
+			library_new.write(line)
+	
+library_new.close()
+
+
+

@@ -1,0 +1,66 @@
+#!/bin/csh -f
+
+
+foreach item (`ls *_1d0_100c_t.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_1V_100C/tt1p0v100c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_1d0_0c_t.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_1V_0C/tt1p0v0c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_1d0_100c_b.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_1V_100C/ff1p0v100c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_1d0_0c_b.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_1V_0C/ff1p0v0c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_0d65_100c_t.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_0P65V_100C/tt0p65v100c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_0d65_0c_t.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_0P65V_0C/tt0p65v0c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_0d65_100c_b.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_0P65V_100C/ff0p65v100c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_0d65_0c_b.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_0P65V_0C/ff0p65v0c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+
+foreach item (`ls *_1d3_100c_t.lib`)
+   echo "Processing $item..."
+   sed	-e '/operating_conditions /s/PVT_1P3V_100C/tt1p3v100c/g' \
+   $item > $item.new
+   mv $item.new $item
+end
+

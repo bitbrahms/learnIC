@@ -1,0 +1,66 @@
+#!/bin/csh -f
+
+
+foreach item (`ls *_1d0_100c_t.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_1d0_100c_t/g' $item 
+   sed  -i -e 's/PVT_1V_100C/tt1p0v100c/g' $item
+end
+
+foreach item (`ls *_1d0_0c_t.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_1d0_0c_t/g' $item
+   sed	-i -e 's/PVT_1V_0C/tt1p0v0c/g' $item
+end
+
+foreach item (`ls *_1d0_100c_b.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_1d0_100c_b/g' $item
+   sed	-i -e 's/PVT_1V_100C/ff1p0v100c/g' $item
+end
+
+foreach item (`ls *_1d0_0c_b.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_1d0_0c_b/g' $item
+   sed	-i -e 's/PVT_1V_0C/ff1p0v0c/g' $item
+end
+
+foreach item (`ls *_0d65_100c_t.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d65_100c_t/g' $item
+   sed	-i -e 's/PVT_0P65V_100C/tt0p65v100c/g' $item
+end
+
+foreach item (`ls *_0d65_0c_t.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d65_0c_t/g' $item
+   sed	-i -e 's/PVT_0P65V_0C/tt0p65v0c/g' $item
+end
+
+foreach item (`ls *_0d65_100c_b.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d65_100c_b/g' $item
+   sed	-i -e 's/PVT_0P65V_100C/ff0p65v100c/g' $item
+end
+
+foreach item (`ls *_0d65_0c_b.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d65_0c_b/g' $item
+   sed	-i -e 's/PVT_0P65V_0C/ff0p65v0c/g' $item
+end
+
+foreach item (`ls *_1d3_100c_t.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_1d3_100c_t/g' $item
+   sed  -i -e 's/PVT_1P3V_100C/tt1p3v100c/g' $item
+end
+
+foreach item (`ls *_0d9_125c_w.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d9_125c_w/g' $item
+   sed	-i -e 's/PVT_0P9V_125C/ss0p9v125c/g' $item
+end
+
+foreach item (`ls *_0d9_0c_w.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d9_0c_w/g' $item
+   sed	-i -e 's/PVT_0P9V_0C/ss0p9v0c/g' $item
+end
+foreach item (`ls *_0d63_125c_w.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d63_125c_w/g' $item
+   sed	-i -e 's/PVT_0P63V_125C/ss0p63v125c/g' $item
+end
+
+foreach item (`ls *_0d63_0c_w.lib`)
+   sed	-i -e '/library (btac_tagcore19)/s/btac_tagcore19/btac_tagcore19_0d63_0c_w/g' $item
+   sed	-i -e 's/PVT_0P63V_0C/ss0p63v0c/g' $item
+end
